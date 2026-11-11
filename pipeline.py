@@ -14,7 +14,8 @@ from typing import List, Dict, Any, Optional
 from google import genai
 from google.genai import types
 
-DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+DISCOVERY_MODEL = "gemini-3.5-flash-lite"
+ADAPTATION_MODEL = "gemini-3.5-flash"
 
 WUXIA_STRICT_SYSTEM_INSTRUCTION = """
 당신은 정통무협(正統武俠) 웹소설 집필을 위한 에피소드 기획 수석 작가입니다.
@@ -63,25 +64,61 @@ class StoryHunterPipeline:
             with open(self.history_file, "w", encoding="utf-8") as f:
                 json.dump(history, f, ensure_ascii=False, indent=2)
 
-    def _generate_with_retry(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.7) -> str:
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                config_args = {"temperature": temperature}
-                if system_instruction:
-                    config_args["system_instruction"] = system_instruction
-                
-                response = self.client.models.generate_content(
-                    model=DEFAULT_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(**config_args)
-                )
-                return response.text
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(2 * (attempt + 1))
-                else:
-                    raise e
+    def _generate_with_retry(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.7, model: str = ADAPTATION_MODEL) -> str:
+        """
+        API 오류 및 할당량 제한에 유연하게 대처하는 스마트 재시도 & 폴백 함수:
+        1. 429 (분당 호출 제한): 60초 대기 후 재시도
+        2. 500, 502, 503, 504 (서버 혼잡/타임아웃): 지수 백오프(15s, 30s, 60s) 후 재시도
+        3. 일일 한도 초과 또는 상위 모델 지속 에러: 하위 모델(gemini-3.5-flash-lite)로 자동 전환(Fallback)
+        """
+        models_to_try = [model]
+        if model != DISCOVERY_MODEL:
+            models_to_try.append(DISCOVERY_MODEL)  # 상위 모델 실패 시 플래시 라이트로 자동 폴백
+
+        last_error = None
+        for current_model in models_to_try:
+            print(f">> [호출 시도] 모델: {current_model}")
+            max_attempts = 4
+            for attempt in range(max_attempts):
+                try:
+                    config_args = {"temperature": temperature}
+                    if system_instruction:
+                        config_args["system_instruction"] = system_instruction
+                    
+                    response = self.client.models.generate_content(
+                        model=current_model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(**config_args)
+                    )
+                    return response.text
+                except Exception as e:
+                    last_error = e
+                    err_msg = str(e).lower()
+                    print(f"!! [API 경고 - 시도 {attempt + 1}/{max_attempts}] 모델({current_model}) 호출 실패: {e}")
+
+                    # 1. 429 분당 요청량 제한 (Rate limit / Quota)
+                    if "429" in err_msg or "resource_exhausted" in err_msg or "quota" in err_msg:
+                        if "daily" in err_msg or "day" in err_msg or "limit" in err_msg:
+                            print(f">> 일일 할당량 관련 제한 감지됨. 다음 모델로 전환합니다.")
+                            break  # 다음 폴백 모델로 즉시 전환
+                        wait_sec = 60
+                        print(f">> 분당 호출 제한(429) 감지: {wait_sec}초간 쿨다운 대기 후 재시도합니다...")
+                        time.sleep(wait_sec)
+                        continue
+
+                    # 2. 503 서버 혼잡, 504 타임아웃, 502/500 일시적 장애
+                    if any(code in err_msg for code in ["503", "504", "502", "500", "overloaded", "unavailable", "timeout", "busy"]):
+                        wait_sec = (attempt + 1) * 15
+                        print(f">> 구글 API 서버 혼잡/타임아웃: {wait_sec}초 대기 후 재시도합니다...")
+                        time.sleep(wait_sec)
+                        continue
+
+                    # 그 외 일반 에러도 잠시 대기 후 재시도
+                    if attempt < max_attempts - 1:
+                        time.sleep(5 * (attempt + 1))
+
+        # 모든 모델 및 재시도 실패 시 예외 발생
+        raise RuntimeError(f"모든 모델 호출 및 재시도 실패. 마지막 에러: {last_error}")
 
     # 1. 작품 발굴 및 추천
     def discover_works(self, theme_or_genre: Optional[str] = None, count: int = 3) -> List[Dict[str, Any]]:
@@ -114,7 +151,7 @@ class StoryHunterPipeline:
   }
 ]
 """
-        text = self._generate_with_retry(prompt, temperature=0.8)
+        text = self._generate_with_retry(prompt, temperature=0.8, model=DISCOVERY_MODEL)
         data = self._parse_json_from_response(text)
         return data if isinstance(data, list) else [data]
 
