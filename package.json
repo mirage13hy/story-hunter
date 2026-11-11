@@ -1,0 +1,13 @@
+{
+  "name": "story-hunter",
+  "version": "2.0.0",
+  "description": "웹소설 에피소드 발굴 및 정통무협장르 치환/변환 시스템",
+  "scripts": {
+    "start": "netlify dev",
+    "build": "echo 'No build step required'"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "^0.7.12",
+    "@astryxdesign/theme-neutral": "^0.7.12"
+  }
+}

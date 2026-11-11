@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>스토리 헌터 - 정통무협 웹소설 에피소드 발굴기</title>
+
+  <!-- Astryx Design System & Theme Foundations -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@astryxdesign/core@0.7.12/src/reset.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@astryxdesign/core@0.7.12/dist/astryx.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@astryxdesign/theme-neutral@0.7.12/dist/theme.css" />
+
+  <style>
+    :root {
+      --primary-color: #1e3a8a;
+      --primary-hover: #1e40af;
+      --accent-gold: #b45309;
+      --surface-bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border-color: #e2e8f0;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --danger-bg: #fef2f2;
+      --danger-border: #ef4444;
+      --danger-text: #991b1b;
+    }
+
+    body {
+      font-family: 'Noto Sans KR', 'Figtree', sans-serif;
+      background-color: var(--surface-bg);
+      color: var(--text-main);
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+    }
+
+    .app-container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 5rem;
+    }
+
+    /* Header */
+    .hero-banner {
+      background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%);
+      color: white;
+      padding: 2.5rem 2rem;
+      border-radius: 14px;
+      margin-bottom: 2rem;
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.2);
+    }
+    .hero-banner h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    .hero-banner p {
+      font-size: 1.05rem;
+      color: #cbd5e1;
+      margin: 0;
+    }
+
+    /* Strict Rule Alert */
+    .rule-banner {
+      background-color: var(--danger-bg);
+      border-left: 5px solid var(--danger-border);
+      color: var(--danger-text);
+      padding: 1rem 1.25rem;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      font-size: 0.92rem;
+    }
+    .rule-banner strong {
+      font-weight: 700;
+      font-size: 0.98rem;
+    }
+
+    /* Tabs */
+    .tab-nav {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 2px solid var(--border-color);
+      margin-bottom: 2rem;
+    }
+    .tab-btn {
+      padding: 0.75rem 1.5rem;
+      background: none;
+      border: none;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      position: relative;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      color: var(--primary-color);
+    }
+    .tab-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: -2px;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background-color: var(--primary-color);
+      border-radius: 3px 3px 0 0;
+    }
+
+    .tab-pane {
+      display: none;
+    }
+    .tab-pane.active {
+      display: block;
+    }
+
+    /* Cards & Controls */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.2rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .card.selected {
+      border-color: #3b82f6;
+      background-color: #f8faff;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.65rem 1.25rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s;
+      gap: 0.4rem;
+    }
+    .btn-primary {
+      background-color: var(--primary-color);
+      color: white;
+    }
+    .btn-primary:hover {
+      background-color: var(--primary-hover);
+    }
+    .btn-secondary {
+      background-color: #f1f5f9;
+      color: #334155;
+      border-color: #cbd5e1;
+    }
+    .btn-secondary:hover {
+      background-color: #e2e8f0;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .form-group {
+      margin-bottom: 1.2rem;
+    }
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      font-size: 0.92rem;
+    }
+    .form-control {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      font-size: 0.95rem;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+    .form-control:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border-radius: 9999px;
+      background-color: #e0e7ff;
+      color: #3730a3;
+      margin-right: 0.3rem;
+    }
+
+    /* Modal / Result View */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15, 23, 42, 0.6);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .modal-backdrop.active {
+      display: flex;
+    }
+    .modal-box {
+      background: white;
+      border-radius: 14px;
+      max-width: 900px;
+      width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 2rem;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+  <!-- Hero Banner -->
+  <header class="hero-banner">
+    <h1>⚔️ 스토리 헌터 (Netlify 대시보드)</h1>
+    <p>전 세계 다양한 장르·매체의 걸작 에피소드를 발굴하여 정통무협 웹소설 소재로 치환합니다.</p>
+  </header>
+
+  <!-- Strict Wuxia Rule Alert -->
+  <div class="rule-banner">
+    <strong>⚠️ 정통무협 절대 원칙 (仙俠 판타지 100% 배제)</strong><br />
+    도술, 선술, 영약 환단 신선화, 강시, 환혼술(빙의/환생), 기문진법 결계 등 선협 요소를 일체 배제합니다. 오직 구파일방, 세가, 표국, 관부, 사파, 기경팔맥, 점혈, 암기, 독공, 협의와 은원의 정통무협 문법으로만 에피소드를 치환합니다.
+  </div>
+
+  <!-- Tab Navigation -->
+  <nav class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('tab-discover')">🔍 1. 작품 발굴 및 선택</button>
+    <button class="tab-btn" onclick="switchTab('tab-custom')">✍️ 2. 직접 작품 입력</button>
+    <button class="tab-btn" onclick="switchTab('tab-archive')">📂 3. 무협 아카이브 (보관함)</button>
+  </nav>
+
+  <!-- Tab 1: 작품 발굴 및 선택 -->
+  <section id="tab-discover" class="tab-pane active">
+    <div class="card">
+      <div style="display: grid; grid-template-columns: 3fr 1fr 1.5fr; gap: 1rem; align-items: end;">
+        <div class="form-group" style="margin: 0;">
+          <label>발굴 테마 / 장르 / 키워드</label>
+          <input type="text" id="discover-theme" class="form-control" placeholder="예: 서부극, 하이스트 케이퍼, 심리 스릴러, 해외 컬트 명작 (비워두면 자유 발굴)" />
+        </div>
+        <div class="form-group" style="margin: 0;">
+          <label>발굴 수량</label>
+          <select id="discover-count" class="form-control">
+            <option value="3" selected>3개</option>
+            <option value="5">5개</option>
+          </select>
+        </div>
+        <div>
+          <button id="btn-discover" class="btn btn-primary" style="width: 100%;" onclick="startDiscovery()">
+            <span>🚀 새 작품 발굴하기</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 발굴 목록 헤더 및 전체선택 버튼 -->
+    <div id="works-header" style="display: flex; justify-content: space-between; align-items: center; margin: 1.5rem 0 1rem;">
+      <div>
+        <h3 id="works-title" style="margin: 0;">📋 발굴된 추천 작품 목록 (<span id="works-count">0</span>건)</h3>
+        <p style="margin: 0.2rem 0 0; font-size: 0.88rem; color: var(--text-muted);">
+          마음에 드는 작품을 체크박스로 선택하세요 (1개, 여러 개 다중 선택 가능).
+        </p>
+      </div>
+      <div style="display: flex; gap: 0.5rem;">
+        <!-- 수정요청 1 반영: 즉시 작동하는 전체선택 & 선택해제 -->
+        <button class="btn btn-secondary" onclick="toggleSelectAll(true)">전체 선택</button>
+        <button class="btn btn-secondary" onclick="toggleSelectAll(false)">선택 해제</button>
+      </div>
+    </div>
+
+    <!-- 작품 카드 목록 컨테이너 -->
+    <div id="works-container">
+      <div class="card" style="text-align: center; color: var(--text-muted); padding: 3rem 1rem;">
+        상단에서 [새 작품 발굴하기] 버튼을 누르면 추천 명작들이 이곳에 표시됩니다.
+      </div>
+    </div>
+
+    <!-- 선택 일괄 변환 바 -->
+    <div id="batch-action-bar" style="margin-top: 1.5rem; display: none;">
+      <button id="btn-batch-adapt" class="btn btn-primary" style="width: 100%; padding: 1rem; font-size: 1.05rem;" onclick="adaptSelectedWorks()">
+        ⚡ 선택한 <span id="selected-badge">0</span>개 작품 에피소드 분석 및 정통무협 치환 시작
+      </button>
+    </div>
+  </section>
+
+  <!-- Tab 2: 직접 작품 입력 -->
+  <section id="tab-custom" class="tab-pane">
+    <div class="card">
+      <h3 style="margin-top: 0;">알고 있는 작품 직접 분석 및 변환하기</h3>
+      <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.5rem;">
+        원하는 영화, 드라마, 소설, 게임 등의 제목을 입력하면 곧바로 사건 서사 요약과 에피소드 단위 정통무협 치환 아이디어를 도출합니다.
+      </p>
+
+      <div class="form-group">
+        <label>작품명 (필수)</label>
+        <input type="text" id="custom-title" class="form-control" placeholder="예: 영화 노인을 위한 나라는 없다, 소설 몬테크리스토 백작, 게임 라스트 오브 어스 등" />
+      </div>
+
+      <div class="form-group">
+        <label>강조하고 싶은 특정 사건 또는 줄거리 메모 (선택 사항)</label>
+        <textarea id="custom-desc" class="form-control" rows="3" placeholder="예: 후반부 호텔 복도에서의 숨소리 죽인 총격 대치 씬, 탈옥 후 신분 세탁 트릭 등"></textarea>
+      </div>
+
+      <button id="btn-custom-adapt" class="btn btn-primary" style="width: 100%; padding: 0.85rem;" onclick="adaptCustomWork()">
+        ⚡ 즉시 에피소드 분석 및 정통무협 치환 실행
+      </button>
+    </div>
+  </section>
+
+  <!-- Tab 3: 무협 아카이브 (보관함) -->
+  <section id="tab-archive" class="tab-pane">
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">📂 변환된 정통무협 에피소드 리포트</h3>
+        <input type="text" id="archive-search" class="form-control" style="max-width: 300px;" placeholder="키워드/제목 검색..." oninput="renderArchiveList()" />
+      </div>
+      <div id="archive-list">
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">아직 변환된 리포트가 없습니다.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Modal Viewer -->
+<div id="result-modal" class="modal-backdrop">
+  <div class="modal-box">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem;">
+      <div>
+        <h2 id="modal-title" style="margin: 0; color: var(--primary-color);">정통무협 에피소드 리포트</h2>
+        <p id="modal-subtitle" style="margin: 0.3rem 0 0; font-size: 0.88rem; color: var(--text-muted);"></p>
+      </div>
+      <button class="btn btn-secondary" onclick="closeModal()">닫기 ✕</button>
+    </div>
+
+    <!-- Action Buttons -->
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+      <button class="btn btn-primary" onclick="downloadCurrentMD()">📥 Markdown 다운로드 (.md)</button>
+      <button class="btn btn-secondary" onclick="downloadCurrentTXT()">📄 텍스트 다운로드 (.txt)</button>
+      <button class="btn btn-secondary" onclick="copyCurrentToClipboard()">📋 클립보드 복사</button>
+    </div>
+
+    <!-- Content Body -->
+    <div id="modal-body" style="white-space: pre-wrap; font-family: inherit; font-size: 0.95rem; line-height: 1.7; background: #fafafa; padding: 1.5rem; border-radius: 8px; border: 1px solid #e5e7eb;"></div>
+  </div>
+</div>
+
+<script>
+  // 상태 관리
+  let currentWorks = [];
+  let selectedIndices = new Set();
+  let archiveReports = JSON.parse(localStorage.getItem('wuxia_archive') || '[]');
+  let activeMarkdown = "";
+  let activeTitle = "";
+
+  // 탭 전환
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+    if (tabId === 'tab-archive') renderArchiveList();
+  }
+
+  // 1. 작품 발굴 시작
+  async function startDiscovery() {
+    const btn = document.getElementById('btn-discover');
+    const theme = document.getElementById('discover-theme').value.trim();
+    const count = parseInt(document.getElementById('discover-count').value, 10);
+
+    btn.disabled = true;
+    btn.innerHTML = `<span class="loading-spinner"></span> 발굴 중...`;
+
+    try {
+      const res = await fetch('/.netlify/functions/hunter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'discover', theme: theme, count: count })
+      });
+
+      if (!res.ok) throw new Error(`서버 응답 오류 (${res.status})`);
+      const data = await res.json();
+      currentWorks = data.works || [];
+      selectedIndices.clear();
+      renderWorksList();
+    } catch (err) {
+      alert(`작품 발굴 중 오류가 발생했습니다: ${err.message}\n(Netlify 환경변수에 GEMINI_API_KEY가 등록되어 있는지 확인해주세요)`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<span>🚀 새 작품 발굴하기</span>`;
+    }
+  }
+
+  // 발굴 목록 렌더링
+  function renderWorksList() {
+    const container = document.getElementById('works-container');
+    const countSpan = document.getElementById('works-count');
+    countSpan.innerText = currentWorks.length;
+
+    if (currentWorks.length === 0) {
+      container.innerHTML = `<div class="card" style="text-align: center; color: var(--text-muted); padding: 3rem 1rem;">발굴된 작품이 없습니다.</div>`;
+      document.getElementById('batch-action-bar').style.display = 'none';
+      return;
+    }
+
+    container.innerHTML = currentWorks.map((work, idx) => {
+      const isSelected = selectedIndices.has(idx);
+      return `
+        <div class="card ${isSelected ? 'selected' : ''}" id="work-card-${idx}">
+          <div style="display: flex; gap: 1rem; align-items: flex-start;">
+            <input type="checkbox" id="chk-${idx}" style="width: 20px; height: 20px; margin-top: 4px; cursor: pointer;" 
+                   ${isSelected ? 'checked' : ''} onchange="toggleWorkSelection(${idx})" />
+            <div style="flex: 1;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <h3 style="margin: 0; font-size: 1.25rem;">${idx + 1}. ${work.title} (${work.year || ''})</h3>
+                <div>
+                  <span class="badge">${work.media || '매체'}</span>
+                  <span class="badge">${work.genre || '장르'}</span>
+                  <span class="badge">${work.country || '국가'}</span>
+                </div>
+              </div>
+              <p style="margin: 0.6rem 0; font-size: 0.95rem;"><strong>줄거리:</strong> ${work.summary || ''}</p>
+              <p style="margin: 0; font-size: 0.92rem; color: #b45309; background: #fffbeb; padding: 0.6rem 0.8rem; border-radius: 6px;">
+                💡 <strong>추천 이유:</strong> ${work.recommendation_reason || ''}
+              </p>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    updateBatchBar();
+  }
+
+  // 수정요청 1 반영: 전체 선택 / 해제 토글 (체크박스 및 카드 상태 즉각 동기화)
+  function toggleSelectAll(selectAll) {
+    if (selectAll) {
+      selectedIndices = new Set(currentWorks.map((_, i) => i));
+    } else {
+      selectedIndices.clear();
+    }
+
+    currentWorks.forEach((_, idx) => {
+      const chk = document.getElementById(`chk-${idx}`);
+      const card = document.getElementById(`work-card-${idx}`);
+      if (chk) chk.checked = selectAll;
+      if (card) {
+        if (selectAll) card.classList.add('selected');
+        else card.classList.remove('selected');
+      }
+    });
+
+    updateBatchBar();
+  }
+
+  function toggleWorkSelection(idx) {
+    const chk = document.getElementById(`chk-${idx}`);
+    const card = document.getElementById(`work-card-${idx}`);
+    if (chk.checked) {
+      selectedIndices.add(idx);
+      card.classList.add('selected');
+    } else {
+      selectedIndices.delete(idx);
+      card.classList.remove('selected');
+    }
+    updateBatchBar();
+  }
+
+  function updateBatchBar() {
+    const bar = document.getElementById('batch-action-bar');
+    const badge = document.getElementById('selected-badge');
+    const count = selectedIndices.size;
+    badge.innerText = count;
+    bar.style.display = count > 0 ? 'block' : 'none';
+  }
+
+  // 선택한 작품 일괄 변환
+  async function adaptSelectedWorks() {
+    const sorted = Array.from(selectedIndices).sort((a, b) => a - b);
+    if (sorted.length === 0) return;
+
+    const btn = document.getElementById('btn-batch-adapt');
+    btn.disabled = true;
+
+    for (let i = 0; i < sorted.length; i++) {
+      const targetWork = currentWorks[sorted[i]];
+      btn.innerHTML = `<span class="loading-spinner"></span> [${i + 1}/${sorted.length}] ${targetWork.title} 에피소드 분석 및 정통무협 치환 중...`;
+      await runSingleAdaptation(targetWork);
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = `⚡ 선택한 ${sorted.length}개 작품 변환 완료!`;
+    alert(`선택한 ${sorted.length}개 작품의 정통무협 변환이 완료되었습니다!\n상단 [무협 아카이브] 탭에서 확인하세요.`);
+    switchTab('tab-archive');
+  }
+
+  // 직접 입력 변환
+  async function adaptCustomWork() {
+    const title = document.getElementById('custom-title').value.trim();
+    const desc = document.getElementById('custom-desc').value.trim();
+    if (!title) {
+      alert("작품명을 입력해주세요.");
+      return;
+    }
+
+    const btn = document.getElementById('btn-custom-adapt');
+    btn.disabled = true;
+    btn.innerHTML = `<span class="loading-spinner"></span> 에피소드 분석 및 정통무협 치환 중...`;
+
+    const work = {
+      title: title,
+      year: "직접 지정",
+      country: "글로벌",
+      media: "사용자 지정",
+      genre: "기타",
+      summary: desc || "사용자 직접 입력 작품",
+      recommendation_reason: "사용자 직접 지정 분석"
+    };
+
+    const resData = await runSingleAdaptation(work);
+    btn.disabled = false;
+    btn.innerHTML = `⚡ 즉시 에피소드 분석 및 정통무협 치환 실행`;
+
+    if (resData && resData.markdown) {
+      openModal(work.title, resData.markdown);
+    }
+  }
+
+  async function runSingleAdaptation(work) {
+    try {
+      const res = await fetch('/.netlify/functions/hunter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'adapt', work: work })
+      });
+
+      if (!res.ok) throw new Error(`변환 실패 (${res.status})`);
+      const data = await res.json();
+      
+      // 아카이브에 영구 저장 (localStorage)
+      const report = {
+        id: Date.now() + Math.random().toString(36).substr(2, 4),
+        title: work.title,
+        date: new Date().toLocaleString("ko-KR"),
+        markdown: data.markdown
+      };
+      archiveReports.unshift(report);
+      localStorage.setItem('wuxia_archive', JSON.stringify(archiveReports));
+      return data;
+    } catch (e) {
+      alert(`[${work.title}] 변환 중 오류: ${e.message}`);
+      return null;
+    }
+  }
+
+  // 아카이브 목록 렌더링
+  function renderArchiveList() {
+    const container = document.getElementById('archive-list');
+    const query = document.getElementById('archive-search').value.toLowerCase();
+    const filtered = archiveReports.filter(r => r.title.toLowerCase().includes(query) || r.markdown.toLowerCase().includes(query));
+
+    if (filtered.length === 0) {
+      container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 2rem;">검색된 리포트가 없습니다.</p>`;
+      return;
+    }
+
+    container.innerHTML = filtered.map(r => `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-bottom: 1px solid var(--border-color);">
+        <div>
+          <h4 style="margin: 0; font-size: 1.05rem;">📜 ${r.title}</h4>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">${r.date}</span>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="btn btn-secondary" onclick="viewArchiveReport('${r.id}')">내용 열람</button>
+          <button class="btn btn-secondary" style="color: #dc2626;" onclick="deleteArchiveReport('${r.id}')">삭제</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function viewArchiveReport(id) {
+    const report = archiveReports.find(r => r.id === id);
+    if (report) {
+      openModal(report.title, report.markdown);
+    }
+  }
+
+  function deleteArchiveReport(id) {
+    if (!confirm("정말 이 리포트를 삭제하시겠습니까?")) return;
+    archiveReports = archiveReports.filter(r => r.id !== id);
+    localStorage.setItem('wuxia_archive', JSON.stringify(archiveReports));
+    renderArchiveList();
+  }
+
+  // Modal Control
+  function openModal(title, markdown) {
+    activeTitle = title;
+    activeMarkdown = markdown;
+    document.getElementById('modal-title').innerText = `[정통무협 리포트] ${title}`;
+    document.getElementById('modal-subtitle').innerText = `선협 판타지 요소 배제 | 정통무협 에피소드 실전 치환`;
+    document.getElementById('modal-body').innerText = markdown;
+    document.getElementById('result-modal').classList.add('active');
+  }
+
+  function closeModal() {
+    document.getElementById('result-modal').classList.remove('active');
+  }
+
+  function downloadCurrentMD() {
+    const blob = new Blob([activeMarkdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeTitle.replace(/[\/\\:*?"<>|]/g, '')}_무협에피소드.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadCurrentTXT() {
+    const blob = new Blob([activeMarkdown], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeTitle.replace(/[\/\\:*?"<>|]/g, '')}_무협에피소드.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function copyCurrentToClipboard() {
+    navigator.clipboard.writeText(activeMarkdown).then(() => {
+      alert("클립보드에 복사되었습니다!");
+    });
+  }
+</script>
+</body>
+</html>
