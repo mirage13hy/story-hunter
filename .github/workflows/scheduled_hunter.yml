@@ -1,20 +1,25 @@
-name: Scheduled Story Hunter
+name: Scheduled Story Hunter (Auto 1 Work per Run)
 
 on:
   schedule:
-    # 매일 자정 및 정오 (한국 시간 09:00, 21:00) 정기 자동 실행
-    - cron: '0 0,12 * * *'
-  workflow_dispatch: # 관리자가 원할 때 수동 실행도 가능
+    # 한국 시간(KST = UTC+9) 전략적 저트래픽 분산 스케줄 (일 6회, 회당 1작품 심층 완결)
+    # 16:00~17:00 구글 글로벌 API 리셋 폭주 시간을 완벽히 회피한 안전 시간대:
+    # KST 02:00 (UTC 17:00), 03:00 (UTC 18:00), 04:00 (UTC 19:00), 05:00 (UTC 20:00), 10:00 (UTC 01:00), 13:30 (UTC 04:30)
+    - cron: '0 17,18,19,20,1 * * *'
+    - cron: '30 4 * * *'
+  workflow_dispatch: # 수동 즉시 실행 가능
 
 jobs:
-  discover_and_update:
+  discover_and_adapt:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: setup-python@v5
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -27,13 +32,12 @@ jobs:
       - name: Run Story Hunter Worker
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-3.5-flash-lite
         run: |
           python scheduled_job.py
 
-      - name: Commit and Push Updated Queue
+      - name: Commit and Push Updated Storage
         run: |
           git config --global user.name "StoryHunter-Bot"
           git config --global user.email "bot@storyhunter.cloud"
-          git add storage/discovered_queue.json storage/discovered_history.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore(auto): update discovered works queue [skip ci]" && git push)
+          git add storage/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore(auto): add newly adapted wuxia report [skip ci]" && git push)
