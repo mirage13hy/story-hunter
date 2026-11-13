@@ -10,11 +10,13 @@ import json
 import time
 import random
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+KST = timezone(timedelta(hours=9))
 
 from pipeline import StoryHunterPipeline, DISCOVERY_MODEL, ADAPTATION_MODEL, WUXIA_STRICT_SYSTEM_INSTRUCTION
 
@@ -200,10 +202,11 @@ def run_single_auto_pipeline():
 
     # 5. Firebase 클라우드 DB에 직접 저장 (Netlify 대시보드 3번/4번 탭에 실시간 등장!)
     report_id = f"rep_{int(time.time())}_{random.randint(100, 999)}"
+    kst_now = datetime.now(KST)
     report_data = {
         "id": report_id,
         "title": work_title,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "date": kst_now.strftime("%Y-%m-%d %H:%M:%S"),
         "markdown": md_content,
         "isAdopted": False,
         "timestamp": int(time.time() * 1000)
