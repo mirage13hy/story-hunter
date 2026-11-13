@@ -15,7 +15,8 @@ from google import genai
 from google.genai import types
 
 DISCOVERY_MODEL = "gemini-3.5-flash-lite"
-ADAPTATION_MODEL = "gemini-3.5-flash"
+ADAPTATION_MODEL = "gemini-4-hydrogen"
+FALLBACK_ADAPTATION_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
 
 WUXIA_STRICT_SYSTEM_INSTRUCTION = """
 당신은 정통무협(正統武俠) 웹소설 집필을 위한 에피소드 기획 수석 작가입니다.
@@ -66,14 +67,19 @@ class StoryHunterPipeline:
 
     def _generate_with_retry(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.7, model: str = ADAPTATION_MODEL) -> str:
         """
-        API 오류 및 할당량 제한에 유연하게 대처하는 스마트 재시도 & 폴백 함수:
-        1. 429 (분당 호출 제한): 60초 대기 후 재시도
-        2. 500, 502, 503, 504 (서버 혼잡/타임아웃): 지수 백오프(15s, 30s, 60s) 후 재시도
-        3. 일일 한도 초과 또는 상위 모델 지속 에러: 하위 모델(gemini-3.5-flash-lite)로 자동 전환(Fallback)
+        API 오류 및 할당량 제한에 유연하게 대처하는 스마트 재시도 & 다계층 폴백 함수:
+        1순위: Gemini 4 Hydrogen (초고품질 서사 치환)
+        2순위: Gemini 3.8 Flash (최신 고속 모델)
+        3순위: Gemini 3.5 Flash (안정적 백업)
+        4순위: Gemini 3.5 Flash Lite (최종 안전망)
         """
         models_to_try = [model]
-        if model != DISCOVERY_MODEL:
-            models_to_try.append(DISCOVERY_MODEL)  # 상위 모델 실패 시 플래시 라이트로 자동 폴백
+        if model == ADAPTATION_MODEL:
+            for fallback in FALLBACK_ADAPTATION_MODELS:
+                if fallback not in models_to_try:
+                    models_to_try.append(fallback)
+        elif model != DISCOVERY_MODEL and DISCOVERY_MODEL not in models_to_try:
+            models_to_try.append(DISCOVERY_MODEL)
 
         last_error = None
         for current_model in models_to_try:

@@ -7,10 +7,11 @@ const WUXIA_STRICT_SYSTEM_INSTRUCTION = `
 [에피소드 단위 독립 치환]: 각 에피소드/사건 단위로 기막힌 정통무협 치환 아이디어를 다각도로 제시하십시오.
 `;
 
-async function callGeminiWithFallback(apiKey, prompt, systemInstruction = null, temperature = 0.7, preferredModel = "gemini-3.5-flash") {
+async function callGeminiWithFallback(apiKey, prompt, systemInstruction = null, temperature = 0.7, preferredModel = "gemini-4-hydrogen") {
   const modelsToTry = [preferredModel];
-  if (preferredModel !== "gemini-3.5-flash-lite") {
-    modelsToTry.push("gemini-3.5-flash-lite"); // 상위 모델 실패 시 자동 폴백
+  const priorityChain = ["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"];
+  for (const m of priorityChain) {
+    if (!modelsToTry.includes(m)) modelsToTry.push(m);
   }
 
   let lastError = null;
@@ -186,7 +187,7 @@ exports.handler = async (event, context) => {
     }
   ]
 }`;
-      const { text: adaptRaw, usedModel } = await callGeminiWithFallback(apiKey, adaptPrompt, WUXIA_STRICT_SYSTEM_INSTRUCTION, 0.75, "gemini-3.5-flash");
+      const { text: adaptRaw, usedModel } = await callGeminiWithFallback(apiKey, adaptPrompt, WUXIA_STRICT_SYSTEM_INSTRUCTION, 0.75, "gemini-4-hydrogen");
       const adaptData = parseJSON(adaptRaw);
       const markdown = generateMarkdownReport(work, adaptData, usedModel);
 
@@ -236,7 +237,7 @@ exports.handler = async (event, context) => {
     }
   ]
 }`;
-      const { text: adaptRaw, usedModel } = await callGeminiWithFallback(apiKey, adaptPrompt, WUXIA_STRICT_SYSTEM_INSTRUCTION, 0.75, "gemini-3.5-flash");
+      const { text: adaptRaw, usedModel } = await callGeminiWithFallback(apiKey, adaptPrompt, WUXIA_STRICT_SYSTEM_INSTRUCTION, 0.75, "gemini-4-hydrogen");
       const adaptData = parseJSON(adaptRaw);
       const markdown = generateMarkdownReport(work, adaptData, usedModel);
 

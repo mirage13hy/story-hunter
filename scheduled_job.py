@@ -100,14 +100,11 @@ def run_single_auto_pipeline():
     print(f">> [발굴 완료]: {work_title} ({target_work.get('year', '')}) - {target_work.get('media', '')}")
     print(f">> 줄거리: {target_work.get('summary', '')[:70]}...")
 
-    # 2. 에피소드 서사 요약 분석 (실패 시 모델 다운그레이드 폴백)
-    analysis = None
-    for attempt, model_to_use in enumerate([ADAPTATION_MODEL, DISCOVERY_MODEL]):
-        try:
-            print(f">> 에피소드 분석 진행 중 (모델: {model_to_use}, 시도: {attempt + 1})...")
-            # 임시 모델 지정
-            pipeline_text = pipeline._generate_with_retry(
-                prompt=f"""
+    # 2. 에피소드 서사 요약 분석 (Gemini 4 Hydrogen 우선 -> 3.8-flash -> 3.5-flash 자동 폴백)
+    print(f">> 에피소드 서사 분석 시작 (우선 모델: {ADAPTATION_MODEL})...")
+    try:
+        pipeline_text = pipeline._generate_with_retry(
+            prompt=f"""
 작품 [{work_title}]에서 웹소설에 차용할 만한 가장 흥미진진하고 독창적인 개별 사건/에피소드들을 추출하여 분석하십시오.
 - 사건의 발단, 갈등, 반전, 해결을 딱딱하게 파편화하지 마십시오!
 - 흥미진진한 스토리 요약본을 읽듯이 에피소드의 시작부터 긴장감 넘치는 전개, 기막힌 반전과 결말까지 술술 읽히는 서사형 스토리로 소개하십시오.
@@ -127,15 +124,13 @@ def run_single_auto_pipeline():
   ]
 }}
 """,
-                model=model_to_use,
-                temperature=0.7
-            )
-            analysis = pipeline._parse_json_from_response(pipeline_text)
-            if analysis:
-                break
-        except Exception as e:
-            print(f"!! 분석 에러 ({model_to_use}): {e}")
-            time.sleep(7)
+            model=ADAPTATION_MODEL,
+            temperature=0.7
+        )
+        analysis = pipeline._parse_json_from_response(pipeline_text)
+    except Exception as e:
+        print(f"!! 에피소드 분석 에러: {e}")
+        analysis = None
 
     if not analysis:
         print("!! 에피소드 분석 실패로 종료합니다.")
@@ -143,13 +138,11 @@ def run_single_auto_pipeline():
 
     print(f">> 에피소드 {len(analysis.get('episodes', []))}개 서사 분석 완료.")
 
-    # 3. 정통무협 치환 아이디어 도출 (仙俠 배제, 실패 시 폴백)
-    wuxia_data = None
-    for attempt, model_to_use in enumerate([ADAPTATION_MODEL, DISCOVERY_MODEL]):
-        try:
-            print(f">> 정통무협 사건단위 치환 중 (모델: {model_to_use}, 시도: {attempt + 1})...")
-            wuxia_text = pipeline._generate_with_retry(
-                prompt=f"""
+    # 3. 정통무협 치환 아이디어 도출 (Gemini 4 Hydrogen 우선 -> 3.8-flash -> 3.5-flash 자동 폴백)
+    print(f">> 정통무협 사건단위 치환 시작 (우선 모델: {ADAPTATION_MODEL})...")
+    try:
+        wuxia_text = pipeline._generate_with_retry(
+            prompt=f"""
 다음 분석된 원작의 에피소드들을 [정통무협(正統武俠)] 웹소설 장르로 치환/변환하십시오.
 [원작 에피소드 분석]:
 {json.dumps(analysis, ensure_ascii=False, indent=2)}
@@ -180,16 +173,14 @@ def run_single_auto_pipeline():
   ]
 }}
 """,
-                system_instruction=WUXIA_STRICT_SYSTEM_INSTRUCTION,
-                model=model_to_use,
-                temperature=0.8
-            )
-            wuxia_data = pipeline._parse_json_from_response(wuxia_text)
-            if wuxia_data:
-                break
-        except Exception as e:
-            print(f"!! 무협 치환 에러 ({model_to_use}): {e}")
-            time.sleep(7)
+            system_instruction=WUXIA_STRICT_SYSTEM_INSTRUCTION,
+            model=ADAPTATION_MODEL,
+            temperature=0.8
+        )
+        wuxia_data = pipeline._parse_json_from_response(wuxia_text)
+    except Exception as e:
+        print(f"!! 무협 치환 에러: {e}")
+        wuxia_data = None
 
     if not wuxia_data:
         print("!! 무협 치환 실패로 종료합니다.")
