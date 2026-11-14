@@ -6,6 +6,7 @@
 """
 
 import os
+import sys
 import json
 import time
 import random
@@ -37,17 +38,38 @@ THEME_POOL = [
     "절체절명의 탈옥 또는 난공불락 요새 침투를 다룬 서스펜스 탈출극"
 ]
 
-def push_to_firebase(report: dict):
-    """Firebase Realtime Database에 변환 리포트를 직접 저장 및 최대 120개 보관 큐 관리"""
+def log_run_failure(stage: str, detail: str):
+    """실패 사유를 Firebase(story_hunter/run_logs)에 남기고, 깃허브에 '실패(빨간 X)'로 표시되도록 종료"""
     try:
-        report_id = report.get("id")
-        url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive/{report_id}.json"
-        data = json.dumps(report, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(url, data=data, method="PUT", headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as res:
-            if res.status in (200, 204):
-                print(f">> [Firebase 클라우드 DB 동기화 완료]: {report_id}")
+        kst_now = datetime.now(KST)
+        log = {
+            "time": kst_now.strftime("%Y-%m-%d %H:%M:%S"),
+            "stage": stage,
+            "detail": str(detail)[:1500],
+            "timestamp": int(time.time() * 1000),
+        }
+        url = f"{FIREBASE_DATABASE_URL}/story_hunter/run_logs/fail_{int(time.time())}.json"
+        req = urllib.request.Request(url, data=json.dumps(log, ensure_ascii=False).encode("utf-8"),
+                                     method="PUT", headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=15).close()
+    except Exception as e:
+        print(f"!! 실패 로그 기록조차 실패: {e}")
+    print(f"!! [{stage}] 실패로 종료: {detail}")
+    sys.exit(1)
 
+
+def push_to_firebase(report: dict):
+    """Firebase Realtime Database에 변환 리포트를 저장 (저장 실패 시 예외 발생 → 회차 실패 처리)"""
+    report_id = report.get("id")
+    url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive/{report_id}.json"
+    data = json.dumps(report, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="PUT", headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as res:
+        if res.status not in (200, 204):
+            raise RuntimeError(f"Firebase 저장 응답 코드 {res.status}")
+    print(f">> [Firebase 클라우드 DB 저장 완료]: {report_id}")
+
+    try:
         # 최대 120개 초과 시 가장 오래된 항목 정리 (채택 안 된 항목 우선 정리)
         archive_url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive.json"
         with urllib.request.urlopen(archive_url, timeout=15) as res:
@@ -69,7 +91,7 @@ def push_to_firebase(report: dict):
                         break
             print(f">> 총 {deleted}개의 이전 보관 항목이 정리되었습니다.")
     except Exception as e:
-        print(f"!! [Firebase 동기화/큐 정리 예외 (로컬 저장은 완료)]: {e}")
+        print(f"!! [120개 보관 정리 중 예외 (저장 자체는 완료)]: {e}")
 
 def run_single_auto_pipeline():
     print("=" * 65)
@@ -82,6 +104,7 @@ def run_single_auto_pipeline():
 
     # 1. 1개 작품 발굴 (실패 시 재시도)
     target_work = None
+    last_err = ""
     for attempt in range(3):
         try:
             works = pipeline.discover_works(theme_or_genre=selected_theme, count=1)
@@ -89,12 +112,12 @@ def run_single_auto_pipeline():
                 target_work = works[0]
                 break
         except Exception as e:
+            last_err = str(e)
             print(f"!! 발굴 시도 {attempt + 1} 실패: {e}")
-            time.sleep(5 * (attempt + 1))
+            time.sleep(20 * (attempt + 1))
 
     if not target_work:
-        print("!! 이번 회차 작품 발굴에 실패하여 종료합니다.")
-        return
+        log_run_failure("1단계 작품 발굴", last_err or "발굴 결과 없음")
 
     work_title = target_work.get("title", "")
     print(f">> [발굴 완료]: {work_title} ({target_work.get('year', '')}) - {target_work.get('media', '')}")
@@ -129,12 +152,10 @@ def run_single_auto_pipeline():
         )
         analysis = pipeline._parse_json_from_response(pipeline_text)
     except Exception as e:
-        print(f"!! 에피소드 분석 에러: {e}")
-        analysis = None
+        log_run_failure("2단계 에피소드 서사 분석", e)
 
     if not analysis:
-        print("!! 에피소드 분석 실패로 종료합니다.")
-        return
+        log_run_failure("2단계 에피소드 서사 분석", "빈 응답")
 
     print(f">> 에피소드 {len(analysis.get('episodes', []))}개 서사 분석 완료.")
 
@@ -179,12 +200,10 @@ def run_single_auto_pipeline():
         )
         wuxia_data = pipeline._parse_json_from_response(wuxia_text)
     except Exception as e:
-        print(f"!! 무협 치환 에러: {e}")
-        wuxia_data = None
+        log_run_failure("3단계 정통무협 치환", e)
 
     if not wuxia_data:
-        print("!! 무협 치환 실패로 종료합니다.")
-        return
+        log_run_failure("3단계 정통무협 치환", "빈 응답")
 
     # 4. 로컬 Markdown 저장
     filepath = pipeline.export_to_markdown(target_work, analysis, wuxia_data)
@@ -202,7 +221,10 @@ def run_single_auto_pipeline():
         "isAdopted": False,
         "timestamp": int(time.time() * 1000)
     }
-    push_to_firebase(report_data)
+    try:
+        push_to_firebase(report_data)
+    except Exception as e:
+        log_run_failure("4단계 Firebase 저장", e)
 
     print(f">> [성공 완료!]: {work_title}")
     print(f">> 로컬 저장 경로: {filepath.resolve()}")

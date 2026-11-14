@@ -17,6 +17,21 @@ from google.genai import types
 DISCOVERY_MODEL = "gemini-3.5-flash-lite"
 ADAPTATION_MODEL = "gemini-4-hydrogen"
 FALLBACK_ADAPTATION_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+FALLBACK_DISCOVERY_MODELS = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
+
+
+def _is_daily_quota_error(err_msg: str) -> bool:
+    """구글 429 오류의 quotaId로 '하루 한도' 여부 판별 (예: GenerateRequestsPerDayPerProjectPerModel-FreeTier)"""
+    m = err_msg.lower()
+    return "perday" in m or "per day" in m or "requests per day" in m
+
+
+def _retry_delay_seconds(err_msg: str, default: int = 60) -> int:
+    """구글이 알려주는 retryDelay(예: 'retryDelay': '34s')가 있으면 그 시간 + 여유 5초만 대기"""
+    m = re.search(r"retrydelay['\"]?\s*:\s*['\"]?(\d+)", err_msg.lower())
+    if m:
+        return min(int(m.group(1)) + 5, 120)
+    return default
 
 WUXIA_STRICT_SYSTEM_INSTRUCTION = """
 당신은 정통무협(正統武俠) 웹소설 집필을 위한 에피소드 기획 수석 작가입니다.
@@ -78,7 +93,12 @@ class StoryHunterPipeline:
             for fallback in FALLBACK_ADAPTATION_MODELS:
                 if fallback not in models_to_try:
                     models_to_try.append(fallback)
-        elif model != DISCOVERY_MODEL and DISCOVERY_MODEL not in models_to_try:
+        elif model == DISCOVERY_MODEL:
+            # 발굴용 경량 모델도 막히면 다른 경량 모델로 전환 (고위 모델 낭비 방지)
+            for fallback in FALLBACK_DISCOVERY_MODELS:
+                if fallback not in models_to_try:
+                    models_to_try.append(fallback)
+        elif DISCOVERY_MODEL not in models_to_try:
             models_to_try.append(DISCOVERY_MODEL)
 
         last_error = None
@@ -102,13 +122,14 @@ class StoryHunterPipeline:
                     err_msg = str(e).lower()
                     print(f"!! [API 경고 - 시도 {attempt + 1}/{max_attempts}] 모델({current_model}) 호출 실패: {e}")
 
-                    # 1. 429 분당 요청량 제한 (Rate limit / Quota)
-                    if "429" in err_msg or "resource_exhausted" in err_msg or "quota" in err_msg:
-                        if "daily" in err_msg or "day" in err_msg or "limit" in err_msg:
-                            print(f">> 일일 할당량 관련 제한 감지됨. 다음 모델로 전환합니다.")
-                            break  # 다음 폴백 모델로 즉시 전환
-                        wait_sec = 60
-                        print(f">> 분당 호출 제한(429) 감지: {wait_sec}초간 쿨다운 대기 후 재시도합니다...")
+                    # 1. 429 할당량 초과: '하루 한도'인지 '분당 한도'인지 정확히 구분
+                    #    (구글 오류에는 거의 항상 'limit' 단어가 들어가므로 그것만으로 판단하면 안 됨)
+                    if "429" in err_msg or "resource_exhausted" in err_msg:
+                        if _is_daily_quota_error(err_msg):
+                            print(">> 하루 사용 한도(RPD) 소진 감지 → 다음 모델로 즉시 전환합니다.")
+                            break
+                        wait_sec = _retry_delay_seconds(err_msg, default=60)
+                        print(f">> 분당 한도(RPM/TPM) 초과 → {wait_sec}초 기다린 뒤 같은 모델로 재시도합니다...")
                         time.sleep(wait_sec)
                         continue
 
