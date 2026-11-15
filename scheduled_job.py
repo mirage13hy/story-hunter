@@ -99,114 +99,117 @@ def run_single_auto_pipeline():
     print("=" * 65)
 
     pipeline = StoryHunterPipeline(storage_dir="storage")
-    selected_theme = random.choice(THEME_POOL)
-    print(f">> 이번 회차 테마: [{selected_theme}]")
 
-    # 1. 1개 작품 발굴 (실패 시 재시도)
+    # 1. 숨은 명작 발굴 및 1.5단계 경량 팩트체크 검증 (Gemini 4 Hydrogen 쿼터 낭비 100% 방지)
+    #    (실존성/서사 풍부도가 확인될 때까지 경량 모델(500회)로만 후보를 검증하고, 부적격 시 Hydrogen 호출 없이 즉시 재탐색)
     target_work = None
-    last_err = ""
-    for attempt in range(3):
+    verification = None
+    max_discovery_attempts = 4
+
+    for attempt in range(max_discovery_attempts):
+        selected_theme = random.choice(THEME_POOL)
+        print(f"\n>> [발굴/검증 시도 {attempt + 1}/{max_discovery_attempts}] 테마: [{selected_theme}]")
         try:
-            works = pipeline.discover_works(theme_or_genre=selected_theme, count=1)
-            if works:
-                target_work = works[0]
+            candidates = pipeline.discover_works(theme_or_genre=selected_theme, count=1)
+            if not candidates:
+                continue
+            candidate = candidates[0]
+            cand_title = candidate.get("title", "")
+            print(f">> 발굴 후보: {cand_title} ({candidate.get('media', '')})")
+
+            # 1.5단계 경량 팩트체크 및 출처/자료 좌표 확보 (경량 모델 - 고위 모델 쿼터 소모 0회)
+            print(f">> [1.5단계 팩트체크 & 서사 분석 가능여부 검증 중...] (모델: {DISCOVERY_MODEL})")
+            verif = pipeline.verify_work_candidate(candidate)
+            if verif.get("is_valid", False):
+                target_work = candidate
+                verification = verif
+                print(f">> [1.5단계 검증 통과! 실존 작품 및 서사 확인]: {verif.get('canonical_title', cand_title)}")
+                print(f"   - 창작자/원작: {verif.get('creator_or_author', '확인됨')}")
+                print(f"   - 참고 출처/문서 좌표: {', '.join(verif.get('reference_sources', []))[:120]}...")
                 break
+            else:
+                reason = verif.get("rejection_reason", "실존 불명 또는 서사 자료 불충분")
+                print(f"!! [1.5단계 검증 탈락]: {cand_title} - 사유: {reason}")
+                print(f"   -> [Gemini 4 Hydrogen 쿼터 보존(0회 소모)] 즉시 폐기하고 다음 숨은 명작을 탐색합니다.")
         except Exception as e:
-            last_err = str(e)
-            print(f"!! 발굴 시도 {attempt + 1} 실패: {e}")
-            time.sleep(20 * (attempt + 1))
+            print(f"!! 발굴/검증 시도 {attempt + 1} 중 일시 오류: {e}")
+            time.sleep(10)
 
-    if not target_work:
-        log_run_failure("1단계 작품 발굴", last_err or "발굴 결과 없음")
+    if not target_work or not verification:
+        log_run_failure("1단계/1.5단계 발굴 및 검증", "유효한 실존 작품 후보 확보 실패")
 
-    work_title = target_work.get("title", "")
-    print(f">> [발굴 완료]: {work_title} ({target_work.get('year', '')}) - {target_work.get('media', '')}")
-    print(f">> 줄거리: {target_work.get('summary', '')[:70]}...")
+    canonical_title = verification.get("canonical_title") or target_work.get("title", "")
+    creator = verification.get("creator_or_author", "")
+    ref_sources = verification.get("reference_sources", [])
+    ref_sources_str = "\n".join([f"- {s}" for s in ref_sources]) if ref_sources else "- 위키피디아, TVTropes 및 관련 커뮤니티 데이터"
 
-    # 2. 에피소드 서사 요약 분석 (Gemini 4 Hydrogen 우선 -> 3.8-flash -> 3.5-flash 자동 폴백)
-    print(f">> 에피소드 서사 분석 시작 (우선 모델: {ADAPTATION_MODEL})...")
+    print(f"\n>> [최종 선정 작품 확정]: {canonical_title} ({target_work.get('year', '')}) | 제작: {creator}")
+    print(f">> 출처 및 참고 좌표:\n{ref_sources_str}")
+
+    # 2단계 & 3단계 통합: 에피소드 서사 심층 분석 + 정통무협 치환 (Gemini 4 Hydrogen 단 1회 호출로 쿼터 극대화!)
+    print(f"\n>> 2단계: 에피소드 서사 분석 & 정통무협 치환 일체형 실행 (우선 모델: {ADAPTATION_MODEL})...")
+    print(f">> [Gemini 4 Hydrogen 1회 호출로 분석과 치환을 완결하여 쿼터를 50% 절약합니다.]")
     try:
-        pipeline_text = pipeline._generate_with_retry(
-            prompt=f"""
-작품 [{work_title}]에서 웹소설에 차용할 만한 가장 흥미진진하고 독창적인 개별 사건/에피소드들을 추출하여 분석하십시오.
-- 사건의 발단, 갈등, 반전, 해결을 딱딱하게 파편화하지 마십시오!
-- 흥미진진한 스토리 요약본을 읽듯이 에피소드의 시작부터 긴장감 넘치는 전개, 기막힌 반전과 결말까지 술술 읽히는 서사형 스토리로 소개하십시오.
-- Fact vs Inference 같은 분석 꼬리표는 절대 쓰지 마십시오.
-참고 줄거리: {target_work.get('summary', '')}
+        unified_prompt = f"""
+당신은 전 세계의 서사 매체(영화, 드라마, 소설, 만화, 게임 등)를 정통무협(正統武俠) 웹소설로 재창조하는 최고의 스토리 디렉터입니다.
+
+작품 [{canonical_title}] (제작/원작자: {creator}, 매체: {target_work.get('media', '')}, 연도: {target_work.get('year', '')})을 바탕으로,
+1) 원작의 핵심 사건/에피소드를 생생한 서사형 스토리로 심층 분석하고,
+2) 각 에피소드를 [정통무협(正統武俠)] 장르로 완벽히 치환하십시오.
+
+[작품 출처 및 참고 문서 좌표]:
+{ref_sources_str}
+
+[원작 기본 줄거리/설정 개요]:
+{target_work.get('summary', '')}
+
+[작성 및 치환 지침 - 절대 준수]:
+1. [실제 서사 종합]: 위 작품의 공식 줄거리, 위키, TV Tropes, 레딧 스레드, 대본, 팬포럼 등에 기록된 실제 사건 전개와 갈등을 종합 활용하십시오.
+2. [서사형 스토리텔링]: 에피소드를 항목별로 딱딱하게 파편화하지 말고, 발단부터 갈등 심화, 반전, 해결까지 한 편의 완성된 이야기처럼 자연스럽게 풀어낸 '스토리 요약본(2~4단락)'으로 작성하십시오. (Fact vs Inference 등 분석 꼬리표 금지)
+3. [에피소드 단위 독립 치환]: 전체 세계관이나 인물 명단을 통째로 바꾸지 말고, 오직 [각 사건/에피소드 단위]로 정통무협 치환 아이디어를 다각도에서 제시하십시오.
+4. [仙俠(선협) 절대 금지]: 도술, 선술, 영약 신선화, 강시, 환혼술, 기문진법 결계 등 선협 판타지는 100% 배제하고, 순수 정통무협(구파일방, 세가, 표국, 관부, 사파, 기경팔맥, 암기, 독공, 점혈, 협과 은원)의 문법만을 사용하십시오.
 
 반드시 아래 JSON 형식으로 반환하십시오:
 {{
-  "work_title": "{work_title}",
+  "work_title": "{canonical_title}",
   "overall_premise": "작품 전체의 배경 및 핵심 전제 (2~3줄)",
   "episodes": [
     {{
       "episode_title": "에피소드 소제목",
       "story_summary": "발단부터 갈등 심화, 반전, 해결까지 한 편의 완성된 이야기처럼 자연스럽게 풀어낸 스토리 요약본 (2~4단락)",
-      "key_attraction": "이 에피소드의 핵심 재미/몰입 포인트"
+      "key_attraction": "이 에피소드의 핵심 재미/몰입 포인트",
+      "wuxia_adaptation": {{
+        "wuxia_situation_concept": "무협으로 변환할 핵심 상황 컨셉 (1~2줄)",
+        "adaptation_ideas": [
+          {{
+            "direction_name": "치환 방향",
+            "idea_description": "구체적인 치환 아이디어 설명",
+            "novel_writing_hook": "웹소설에 실제 집필할 때 독자의 반응을 이끌어낼 핵심 사이다/클라이맥스 포인트"
+          }}
+        ],
+        "orthodox_martial_elements": "이 에피소드에 어울리는 정통무협 기믹"
+      }}
     }}
   ]
 }}
-""",
-            model=ADAPTATION_MODEL,
-            temperature=0.7
-        )
-        analysis = pipeline._parse_json_from_response(pipeline_text)
-    except Exception as e:
-        log_run_failure("2단계 에피소드 서사 분석", e)
-
-    if not analysis:
-        log_run_failure("2단계 에피소드 서사 분석", "빈 응답")
-
-    print(f">> 에피소드 {len(analysis.get('episodes', []))}개 서사 분석 완료.")
-
-    # 3. 정통무협 치환 아이디어 도출 (Gemini 4 Hydrogen 우선 -> 3.8-flash -> 3.5-flash 자동 폴백)
-    print(f">> 정통무협 사건단위 치환 시작 (우선 모델: {ADAPTATION_MODEL})...")
-    try:
-        wuxia_text = pipeline._generate_with_retry(
-            prompt=f"""
-다음 분석된 원작의 에피소드들을 [정통무협(正統武俠)] 웹소설 장르로 치환/변환하십시오.
-[원작 에피소드 분석]:
-{json.dumps(analysis, ensure_ascii=False, indent=2)}
-
-[핵심 지침]:
-1. 전체 작품 단위로 세계관이나 등장인물 명단을 통째로 치환하지 마십시오!
-2. 오직 [각 에피소드/사건 단위]로 정통무협 치환 작업을 진행하십시오.
-3. 자세한 캐릭터 이름, 설정을 길게 늘어놓지 말고, 해당 사건을 정통무협에서 어떻게 기막히게 써먹을 수 있는지 [실전 치환 아이디어들]을 다양한 각도에서 제시하십시오. (예: "마교를 쫓는 정파로 치환", "마교에 잠입한 정파 첩자를 쫓는 마교로 치환" 등)
-4. 각 에피소드별 치환 아이디어는 서로 이야기가 이어지지 않아도 상관없습니다.
-5. [仙俠(선협) 절대 금지]: 도술, 선술, 영약 신선화, 강시, 환혼술, 기문진법 결계 등 선협 판타지는 100% 배제하고, 순수 정통무협(구파일방, 세가, 표국, 관부, 사파, 기경팔맥, 암기, 독공, 점혈, 협과 은원)의 문법만을 사용하십시오.
-
-반드시 아래 JSON 형식으로 반환하십시오:
-{{
-  "work_title": "{work_title}",
-  "adapted_episodes": [
-    {{
-      "original_episode_title": "원작 에피소드명",
-      "wuxia_situation_concept": "무협으로 변환할 핵심 상황 컨셉 (1~2줄)",
-      "adaptation_ideas": [
-        {{
-          "direction_name": "치환 방향",
-          "idea_description": "구체적인 치환 아이디어 설명",
-          "novel_writing_hook": "웹소설에 실제 집필할 때 독자의 반응을 이끌어낼 핵심 사이다/클라이맥스 포인트"
-        }}
-      ],
-      "orthodox_martial_elements": "이 에피소드에 어울리는 정통무협 기믹"
-    }}
-  ]
-}}
-""",
+"""
+        response_text = pipeline._generate_with_retry(
+            prompt=unified_prompt,
             system_instruction=WUXIA_STRICT_SYSTEM_INSTRUCTION,
             model=ADAPTATION_MODEL,
-            temperature=0.8
+            temperature=0.75
         )
-        wuxia_data = pipeline._parse_json_from_response(wuxia_text)
+        combined_data = pipeline._parse_json_from_response(response_text)
     except Exception as e:
-        log_run_failure("3단계 정통무협 치환", e)
+        log_run_failure("2단계 서사 분석 & 무협 치환", e)
 
-    if not wuxia_data:
-        log_run_failure("3단계 정통무협 치환", "빈 응답")
+    if not combined_data or not combined_data.get("episodes"):
+        log_run_failure("2단계 서사 분석 & 무협 치환", "빈 응답 또는 에피소드 누락")
+
+    print(f">> [성공] 에피소드 {len(combined_data.get('episodes', []))}개 서사 분석 및 정통무협 치환 완결 (단 1회 호출 성공).")
 
     # 4. 로컬 Markdown 저장
-    filepath = pipeline.export_to_markdown(target_work, analysis, wuxia_data)
+    filepath = pipeline.export_to_markdown(target_work, combined_data, verification=verification)
     with open(filepath, "r", encoding="utf-8") as f:
         md_content = f.read()
 
@@ -215,7 +218,7 @@ def run_single_auto_pipeline():
     kst_now = datetime.now(KST)
     report_data = {
         "id": report_id,
-        "title": work_title,
+        "title": canonical_title,
         "date": kst_now.strftime("%Y-%m-%d %H:%M:%S"),
         "markdown": md_content,
         "isAdopted": False,
@@ -226,7 +229,7 @@ def run_single_auto_pipeline():
     except Exception as e:
         log_run_failure("4단계 Firebase 저장", e)
 
-    print(f">> [성공 완료!]: {work_title}")
+    print(f">> [성공 완료!]: {canonical_title}")
     print(f">> 로컬 저장 경로: {filepath.resolve()}")
     print("=" * 65)
 

@@ -153,12 +153,13 @@ class StoryHunterPipeline:
         history_str = ", ".join(history[-30:]) if history else "없음"
 
         prompt = f"""
-웹소설 에피소드 소스로 활용하기에 뛰어난 다양한 장르와 매체의 작품 {count}개를 발굴하고 추천해주세요.
+웹소설 에피소드 소스로 활용하기에 뛰어난 다양한 장르와 매체의 숨은 작품 {count}개를 발굴하고 추천해주세요.
 
 [발굴 원칙]:
-- 최신 유행작이나 유명작에 편중되지 마십시오.
-- 시대를 초월한 고전 명작, 상업적 성공은 못했으나 스토리가 뛰어난 숨은 명작, 평론가/수상작, 커뮤니티(레딧 등)에서 스토리로 회자되는 작품, 기발한 사건 전개를 가진 실험작 등을 폭넓게 발굴하십시오.
-- 매체 제한 없음: 영화, 미드/해외드라마, 콘솔/PC 게임 스토리, 만화, 애니메이션, 해외 추리/스릴러 소설, 연극/희곡, 미국 코믹스 등.
+- 최신 유행작이나 뻔한 유명 대작에 편중되지 마십시오.
+- 상업적으로 크게 흥행하지 못했거나 대중에게 잊힌 숨은 명작, 소수 매니아들의 컬트작, 인디 게임/콘솔 명작, 마이너한 해외 추리/스릴러 소설, 연극/희곡, 애니메이션/만화 등 숨은 원석을 적극 발굴하십시오.
+- [실존 작품 필수]: 절대로 존재하지 않는 가상의 작품이나 거짓 타이틀을 지어내지(환각) 마십시오. 반드시 실제로 제작/출간/방영/출시된 '실존 작품'이어야 합니다.
+- 매체 제한 없음: 영화, 미드/해외드라마, 콘솔/PC 게임 스토리, 만화, 애니메이션, 해외 소설, 연극/희곡 등.
 - 기존에 이미 발굴한 작품 목록은 제외하십시오: [{history_str}]
 """
         if theme_or_genre:
@@ -181,6 +182,44 @@ class StoryHunterPipeline:
         text = self._generate_with_retry(prompt, temperature=0.8, model=DISCOVERY_MODEL)
         data = self._parse_json_from_response(text)
         return data if isinstance(data, list) else [data]
+
+    # 1.5. 실존성 및 서사 풍부도 검증 필터 (경량 모델 전담 - Gemini 4 Hydrogen 쿼터 보호: 0회 소모)
+    def verify_work_candidate(self, work_info: Dict[str, Any]) -> Dict[str, Any]:
+        title = work_info.get("title", "")
+        media = work_info.get("media", "")
+        year = work_info.get("year", "")
+        country = work_info.get("country", "")
+        summary = work_info.get("summary", "")
+
+        prompt = f"""
+당신은 전 세계의 영화, 드라마, 소설, 만화, 애니메이션, 게임 등의 데이터베이스를 꿰고 있는 팩트 체커입니다.
+다음 발굴 후보 작품에 대해 [실존 여부]와 [서사 풍부도/분석 가능 여부]를 냉정하게 검증하십시오:
+
+[후보 작품 정보]:
+- 제목: {title}
+- 매체: {media}
+- 발표연도: {year}
+- 국가: {country}
+- 알려진 개요: {summary}
+
+[검증 기준]:
+1. [실존성 검증]: 이 작품이 실제로 제작, 출간, 방영, 출시된 실존 작품인가? (가공의 작품, 환각, 모호한 뜬소문 타이틀은 부적격 is_valid=false)
+2. [서사 풍부도 검증]: 에피소드나 사건별로 쪼개어 서사 분석을 진행할 수 있을 만큼 구체적인 플롯, 반전, 인간관계 갈등이 존재하는 작품인가? (단순한 분위기 위주 단편이거나 줄거리 정보가 전혀 없다면 is_valid=false)
+3. [출처/참고 자료 좌표 확보]: 이 작품의 상세 줄거리, 에피소드 가이드, 대본, 비하인드 등을 확인할 수 있는 구체적인 출처/문서 좌표(예: 정확한 공식 원제, 위키피디아 문서명, TV Tropes 페이지명, 레딧 스레드/서브레딧 키워드, IMDb/MAL/Fandom 위키 명칭, 대본/팬포럼 출처 등)를 명시하십시오.
+
+반드시 아래 JSON 형식으로 반환하십시오:
+{{
+  "is_valid": true 또는 false,
+  "rejection_reason": "부적격인 경우 사유 (실존 불명, 단순 단편/플롯 부재, 정보 공백 등. 적격이면 빈 문자열)",
+  "canonical_title": "가장 정확한 공식 원제 및 한글명 (예: 더 이글 / The Eagle Has Landed)",
+  "creator_or_author": "감독, 작가, 개발사 또는 원작자",
+  "reference_sources": [
+    "상세 줄거리 및 에피소드를 추적할 수 있는 구체적 출처/문서/포럼명 3~5개 (예: 'Wikipedia: The Eagle Has Landed (film)', 'TV Tropes: Operation Eagle', 'IMDb: tt0074452')"
+  ]
+}}
+"""
+        text = self._generate_with_retry(prompt, temperature=0.2, model=DISCOVERY_MODEL)
+        return self._parse_json_from_response(text)
 
     # 2. 작품 및 에피소드 분석 (수정요청 3 반영: 스토리 요약본 형태, Fact vs Inference 제거)
     def analyze_episodes(self, work_title: str, additional_info: Optional[str] = None) -> Dict[str, Any]:
@@ -264,7 +303,8 @@ class StoryHunterPipeline:
         self,
         work_info: Dict[str, Any],
         analysis: Dict[str, Any],
-        wuxia_data: Dict[str, Any]
+        wuxia_data: Optional[Dict[str, Any]] = None,
+        verification: Optional[Dict[str, Any]] = None
     ) -> Path:
         safe_title = re.sub(r'[\\/*?:"<>|]', "", work_info.get("title", "work")).strip().replace(" ", "_")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -275,6 +315,13 @@ class StoryHunterPipeline:
         lines.append(f"# [정통무협 에피소드 발굴 리포트] {work_info.get('title')}")
         lines.append(f"- **생성 일시**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"- **원작 정보**: {work_info.get('title')} ({work_info.get('year', '')}, {work_info.get('country', '')}) | {work_info.get('media', '')} ({work_info.get('genre', '')})")
+        if verification:
+            creator = verification.get("creator_or_author")
+            if creator:
+                lines.append(f"- **원작자/제작**: {creator}")
+            sources = verification.get("reference_sources")
+            if sources:
+                lines.append(f"- **참고 출처 및 문서 좌표**: {', '.join(sources)}")
         lines.append("\n---\n")
 
         lines.append("## 1. 원작 및 추천 배경")
@@ -286,7 +333,6 @@ class StoryHunterPipeline:
         lines.append(f"**작품 핵심 전제**: {analysis.get('overall_premise', '')}\n")
         
         episodes_analysis = analysis.get("episodes", [])
-        adapted_episodes = wuxia_data.get("adapted_episodes", [])
 
         for i, ep in enumerate(episodes_analysis, 1):
             ep_title = ep.get("episode_title", f"사건 {i}")
@@ -294,9 +340,12 @@ class StoryHunterPipeline:
             lines.append(f"**📖 원작 에피소드 스토리**:\n{ep.get('story_summary', '')}\n")
             lines.append(f"**✨ 핵심 재미 포인트**: {ep.get('key_attraction', '')}\n")
 
-            matching_adapted = None
-            if i - 1 < len(adapted_episodes):
-                matching_adapted = adapted_episodes[i - 1]
+            # 일체형(unified) wuxia_adaptation 우선 탐색, 없으면 분리형 wuxia_data 매핑
+            matching_adapted = ep.get("wuxia_adaptation")
+            if not matching_adapted and wuxia_data:
+                adapted_episodes = wuxia_data.get("adapted_episodes", [])
+                if i - 1 < len(adapted_episodes):
+                    matching_adapted = adapted_episodes[i - 1]
 
             if matching_adapted:
                 lines.append(f"#### ⚔️ 정통무협 치환 아이디어 (선협 배제)")
