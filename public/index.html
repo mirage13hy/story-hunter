@@ -855,6 +855,11 @@
     throw lastErr;
   }
 
+  function formatAppDate(d = new Date()) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
   const WUXIA_STRICT_SYS_PROMPT = `
 당신은 정통무협(正統武俠) 웹소설 수석 기획 작가입니다.
 [선협 절대 금지]: 도술, 선술, 영약 신선화, 강시, 환혼술(빙의/환생), 기문진법 결계 등 선협 판타지는 100% 배제하고, 순수 정통무협(구파일방, 세가, 표국, 관부, 사파, 기경팔맥, 암기, 독공, 점혈, 협과 은원) 문법만을 적용하십시오.
@@ -877,9 +882,16 @@
     try {
       const apiKey = await getGeminiApiKey();
 
+      // 기존 발굴된 작품 목록 제외 (중복 발굴 100% 방지)
+      const existingTitles = archiveReports.map(r => r.title).filter(Boolean).slice(0, 40).join(', ');
+
       // Step 1: 1개 작품 발굴 (3.5-flash-lite)
       let discPrompt = `웹소설 에피소드 소재로 활용하기에 최적화된 숨은 명작 1개를 엄선하여 발굴하십시오.
-시대를 초월한 고전, 상업적 성공은 못했으나 스토리가 경이로운 명작, 컬트 추리/스릴러/서부극/하이스트/SF 등 매체 불문.`;
+[발굴 원칙]:
+- 최신 유행작이나 유명 대작에 편중되지 마십시오.
+- 시대를 초월한 고전 명작, 상업적 성공은 못했으나 스토리가 경이로운 숨은 명작, 소수 매니아의 컬트작, 인디 게임/콘솔 스토리, 해외 마이너 소설/만화 등 숨은 원석을 적극 발굴하십시오.
+- [실존 필수]: 절대로 가상의 작품이나 거짓 타이틀을 지어내지(환각) 마십시오. 반드시 실제로 제작/출간/방영/출시된 '실존 작품'이어야 합니다.
+- [기존 발굴작 제외]: 다음 작품들은 이미 아카이브에 존재하므로 절대 제외하십시오: [${existingTitles || '없음'}]`;
       if (theme) discPrompt += `\n요청 테마/키워드: ${theme}\n`;
       discPrompt += `
 반드시 아래 JSON 형식(단일 객체)으로만 반환하십시오:
@@ -951,7 +963,7 @@
 
       // Markdown 리포트 조립
       let md = `# [정통무협 에피소드 발굴 리포트] ${work.title}\n`;
-      md += `- **생성 일시**: ${new Date().toLocaleString("ko-KR")} (소요 시간: ${timerSec}초)\n`;
+      md += `- **생성 일시**: ${formatAppDate()} (소요 시간: ${timerSec}초)\n`;
       md += `- **원작 정보**: ${work.title} (${work.year || ""}, ${work.country || ""}) | ${work.media || ""} (${work.genre || ""})\n`;
       md += `- **적용 AI 모델**: ${adaptResult.usedModel}\n\n---\n\n`;
       md += `## 1. 원작 및 추천 배경\n**전체 줄거리 요약**:\n${work.summary || ""}\n\n`;
@@ -979,7 +991,7 @@
       const report = {
         id: 'rep_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
         title: work.title,
-        date: new Date().toLocaleString("ko-KR"),
+        date: formatAppDate(),
         markdown: md,
         isAdopted: false,
         timestamp: Date.now()
@@ -1223,7 +1235,7 @@
 
       // Markdown 조립
       let md = `# [정통무협 에피소드 발굴 리포트] ${work.title}\n`;
-      md += `- **생성 일시**: ${new Date().toLocaleString("ko-KR")}\n`;
+      md += `- **생성 일시**: ${formatAppDate()}\n`;
       md += `- **원작 정보**: ${work.title} (${work.year || ""}, ${work.country || ""}) | ${work.media || ""} (${work.genre || ""})\n`;
       md += `- **적용 AI 모델**: ${adaptResult.usedModel}\n\n---\n\n`;
       md += `## 1. 원작 및 추천 배경\n**전체 줄거리 요약**:\n${work.summary || ""}\n\n`;
@@ -1251,9 +1263,10 @@
       const report = {
         id: 'rep_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
         title: work.title,
-        date: new Date().toLocaleString("ko-KR"),
+        date: formatAppDate(),
         markdown: md,
-        isAdopted: false
+        isAdopted: false,
+        timestamp: Date.now()
       };
 
       archiveReports.unshift(report);
@@ -1373,7 +1386,7 @@
     if (selectedReports.length === 0) return null;
 
     let master = `# ⚔️ [정통무협 웹소설 에피소드 최종 채택 자료집]\n`;
-    master += `- **최종 발행일시**: ${new Date().toLocaleString("ko-KR")}\n`;
+    master += `- **최종 발행일시**: ${formatAppDate()}\n`;
     master += `- **선택 수록 작품 수**: 총 ${selectedReports.length}개 작품\n`;
     master += `- **소유자**: ${currentUser ? currentUser.email : 'mirage13hy@gmail.com'}\n`;
     master += `- **핵심 원칙**: 仙俠(도술/선술/강시/환혼술 등) 100% 배제, 순수 정통무협 사건단위 치환\n\n`;
