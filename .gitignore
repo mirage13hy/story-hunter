@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.streamlit/
+
+# Local Netlify folder
+.netlify
+
+# Keep generated wuxia adaptation markdown reports private
+storage/*.md
