@@ -40,6 +40,42 @@ THEME_POOL = [
     "치밀한 복선과 장대한 서사 구조를 지닌 대작 스토리 애니메이션 및 만화"
 ]
 
+def _get_firebase_auth():
+    """Firebase 비공개 규칙 통과용 인증 (FIREBASE_DB_SECRET 또는 FIREBASE_SERVICE_ACCOUNT)"""
+    db_secret = os.environ.get("FIREBASE_DB_SECRET", "").strip()
+    if db_secret:
+        return f"?auth={db_secret}", {}
+    sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "").strip()
+    if sa_json:
+        try:
+            from google.oauth2 import service_account
+            import google.auth.transport.requests
+            info = json.loads(sa_json)
+            creds = service_account.Credentials.from_service_account_info(
+                info,
+                scopes=[
+                    "https://www.googleapis.com/auth/userinfo.email",
+                    "https://www.googleapis.com/auth/firebase.database",
+                ],
+            )
+            creds.refresh(google.auth.transport.requests.Request())
+            return "", {"Authorization": f"Bearer {creds.token}"}
+        except Exception as e:
+            print(f"!! Firebase 서비스 계정 인증 토큰 생성 실패: {e}")
+    return "", {}
+
+
+def _firebase_request(path: str, method: str = "GET", payload=None, timeout: int = 15):
+    query, auth_headers = _get_firebase_auth()
+    url = f"{FIREBASE_DATABASE_URL}/{path.lstrip('/')}{query}"
+    headers = {"Content-Type": "application/json", **auth_headers}
+    data_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(url, data=data_bytes, method=method, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as res:
+        body = res.read().decode("utf-8")
+        return res.status, (json.loads(body) if body else None)
+
+
 def log_run_failure(stage: str, detail: str):
     """실패 사유를 Firebase(story_hunter/run_logs)에 남기고, 깃허브에 '실패(빨간 X)'로 표시되도록 종료"""
     try:
@@ -50,10 +86,7 @@ def log_run_failure(stage: str, detail: str):
             "detail": str(detail)[:1500],
             "timestamp": int(time.time() * 1000),
         }
-        url = f"{FIREBASE_DATABASE_URL}/story_hunter/run_logs/fail_{int(time.time())}.json"
-        req = urllib.request.Request(url, data=json.dumps(log, ensure_ascii=False).encode("utf-8"),
-                                     method="PUT", headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=15).close()
+        _firebase_request(f"story_hunter/run_logs/fail_{int(time.time())}.json", method="PUT", payload=log, timeout=15)
     except Exception as e:
         print(f"!! 실패 로그 기록조차 실패: {e}")
     print(f"!! [{stage}] 실패로 종료: {detail}")
@@ -63,44 +96,37 @@ def log_run_failure(stage: str, detail: str):
 def push_to_firebase(report: dict):
     """Firebase Realtime Database에 변환 리포트를 저장 (저장 실패 시 예외 발생 → 회차 실패 처리)"""
     report_id = report.get("id")
-    url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive/{report_id}.json"
-    data = json.dumps(report, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="PUT", headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=20) as res:
-        if res.status not in (200, 204):
-            raise RuntimeError(f"Firebase 저장 응답 코드 {res.status}")
+    status, _ = _firebase_request(f"story_hunter/archive/{report_id}.json", method="PUT", payload=report, timeout=20)
+    if status not in (200, 204):
+        raise RuntimeError(f"Firebase 저장 응답 코드 {status}")
     print(f">> [Firebase 클라우드 DB 저장 완료]: {report_id}")
 
     try:
         # 최대 120개 초과 시 가장 오래된 항목 정리 (채택 안 된 항목 우선 정리)
-        archive_url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive.json"
-        with urllib.request.urlopen(archive_url, timeout=15) as res:
-            all_data = json.loads(res.read().decode("utf-8")) or {}
-        
+        _, all_data = _firebase_request("story_hunter/archive.json", method="GET", timeout=15)
+        all_data = all_data or {}
+
         if len(all_data) > 120:
             print(f">> 현재 보관량 {len(all_data)}개 (상한 120개 초과 감지). 오래된 비채택 리포트를 정리합니다...")
-            # 타임스탬프 순 정렬
             sorted_items = sorted(all_data.items(), key=lambda x: x[1].get("timestamp", 0))
             excess_count = len(all_data) - 120
             deleted = 0
             for item_id, item_val in sorted_items:
                 if not item_val.get("isAdopted", False):  # 채택된 중요 리포트는 보존
-                    del_url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive/{item_id}.json"
-                    del_req = urllib.request.Request(del_url, method="DELETE")
-                    with urllib.request.urlopen(del_req, timeout=10):
-                        deleted += 1
+                    _firebase_request(f"story_hunter/archive/{item_id}.json", method="DELETE", timeout=10)
+                    deleted += 1
                     if deleted >= excess_count:
                         break
             print(f">> 총 {deleted}개의 이전 보관 항목이 정리되었습니다.")
     except Exception as e:
         print(f"!! [120개 보관 정리 중 예외 (저장 자체는 완료)]: {e}")
 
+
 def fetch_existing_titles_from_firebase() -> list:
     """Firebase 클라우드 아카이브에 이미 존재하는 모든 작품 제목을 실시간 조회 (중복 발굴 100% 방지용)"""
     try:
-        url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive.json"
-        with urllib.request.urlopen(url, timeout=15) as res:
-            data = json.loads(res.read().decode("utf-8")) or {}
+        _, data = _firebase_request("story_hunter/archive.json", method="GET", timeout=15)
+        data = data or {}
         return [v.get("title", "") for v in data.values() if isinstance(v, dict) and v.get("title")]
     except Exception as e:
         print(f"!! Firebase 기존 작품 목록 조회 실패 (로컬 이력으로 대체): {e}")
