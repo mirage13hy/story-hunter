@@ -19,7 +19,7 @@ load_dotenv()
 
 KST = timezone(timedelta(hours=9))
 
-from pipeline import StoryHunterPipeline, DISCOVERY_MODEL, ADAPTATION_MODEL, WUXIA_STRICT_SYSTEM_INSTRUCTION
+from pipeline import StoryHunterPipeline, DISCOVERY_MODEL, ADAPTATION_MODEL, WUXIA_STRICT_SYSTEM_INSTRUCTION, is_duplicate_work
 
 FIREBASE_DATABASE_URL = "https://kids-location-check-default-rtdb.firebaseio.com"
 
@@ -95,6 +95,18 @@ def push_to_firebase(report: dict):
     except Exception as e:
         print(f"!! [120개 보관 정리 중 예외 (저장 자체는 완료)]: {e}")
 
+def fetch_existing_titles_from_firebase() -> list:
+    """Firebase 클라우드 아카이브에 이미 존재하는 모든 작품 제목을 실시간 조회 (중복 발굴 100% 방지용)"""
+    try:
+        url = f"{FIREBASE_DATABASE_URL}/story_hunter/archive.json"
+        with urllib.request.urlopen(url, timeout=15) as res:
+            data = json.loads(res.read().decode("utf-8")) or {}
+        return [v.get("title", "") for v in data.values() if isinstance(v, dict) and v.get("title")]
+    except Exception as e:
+        print(f"!! Firebase 기존 작품 목록 조회 실패 (로컬 이력으로 대체): {e}")
+        return []
+
+
 def run_single_auto_pipeline():
     print("=" * 65)
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 정기 자동 발굴 & 무협 치환 워커 시작 (1작품 완결형)")
@@ -102,32 +114,52 @@ def run_single_auto_pipeline():
 
     pipeline = StoryHunterPipeline(storage_dir="storage")
 
+    # 클라우드(Firebase) + 로컬 아카이브 전체 제목 실시간 동기화 (수동/자동 합산 중복 100% 차단)
+    cloud_titles = fetch_existing_titles_from_firebase()
+    all_existing_titles = list(set(pipeline.get_history() + cloud_titles))
+    print(f">> [중복 방지 동기화] 클라우드+로컬 기존 작품 {len(all_existing_titles)}개 제외 목록 확보")
+
     # 1. 숨은 명작 발굴 및 1.5단계 경량 팩트체크 검증 (Gemini 4 Hydrogen 쿼터 낭비 100% 방지)
-    #    (실존성/서사 풍부도가 확인될 때까지 경량 모델(500회)로만 후보를 검증하고, 부적격 시 Hydrogen 호출 없이 즉시 재탐색)
     target_work = None
     verification = None
-    max_discovery_attempts = 4
+    max_discovery_attempts = 5
 
     for attempt in range(max_discovery_attempts):
         selected_theme = random.choice(THEME_POOL)
         print(f"\n>> [발굴/검증 시도 {attempt + 1}/{max_discovery_attempts}] 테마: [{selected_theme}]")
         try:
-            candidates = pipeline.discover_works(theme_or_genre=selected_theme, count=1)
+            candidates = pipeline.discover_works(theme_or_genre=selected_theme, count=1, extra_exclude=all_existing_titles)
             if not candidates:
                 continue
             candidate = candidates[0]
             cand_title = candidate.get("title", "")
             print(f">> 발굴 후보: {cand_title} ({candidate.get('media', '')})")
 
+            # 1차 코드 레벨 중복 차단
+            dup_match = is_duplicate_work(cand_title, all_existing_titles)
+            if dup_match:
+                print(f"!! [1단계 중복 작품 차단]: '{cand_title}' ↔ 기존 '{dup_match}' 중복 감지!")
+                print(f"   -> [Gemini 4 Hydrogen 쿼터 보존(0회 소모)] 즉시 폐기하고 다른 작품 탐색")
+                all_existing_titles.append(cand_title)
+                continue
+
             # 1.5단계 경량 팩트체크 및 출처/자료 좌표 확보 (경량 모델 - 고위 모델 쿼터 소모 0회)
             print(f">> [1.5단계 팩트체크 & 서사 분석 가능여부 검증 중...] (모델: {DISCOVERY_MODEL})")
             verif = pipeline.verify_work_candidate(candidate)
             if verif.get("is_valid", False):
+                canonical_cand = verif.get("canonical_title", cand_title)
+                # 2차 코드 레벨 중복 차단 (공식 원제 정규화 후 재검사)
+                dup_match2 = is_duplicate_work(canonical_cand, all_existing_titles)
+                if dup_match2:
+                    print(f"!! [1.5단계 중복 작품 차단]: '{canonical_cand}' ↔ 기존 '{dup_match2}' 중복 감지!")
+                    print(f"   -> [Gemini 4 Hydrogen 쿼터 보존(0회 소모)] 즉시 폐기하고 다른 작품 탐색")
+                    all_existing_titles.append(canonical_cand)
+                    continue
+
                 target_work = candidate
                 verification = verif
-                print(f">> [1.5단계 검증 통과! 실존 작품 및 서사 확인]: {verif.get('canonical_title', cand_title)}")
+                print(f">> [1.5단계 검증 통과! 실존 작품 및 서사 확인]: {canonical_cand}")
                 print(f"   - 창작자/원작: {verif.get('creator_or_author', '확인됨')}")
-                print(f"   - 참고 출처/문서 좌표: {', '.join(verif.get('reference_sources', []))[:120]}...")
                 break
             else:
                 reason = verif.get("rejection_reason", "실존 불명 또는 서사 자료 불충분")

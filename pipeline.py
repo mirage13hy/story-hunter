@@ -33,6 +33,38 @@ def _retry_delay_seconds(err_msg: str, default: int = 60) -> int:
         return min(int(m.group(1)) + 5, 120)
     return default
 
+
+def _extract_title_parts(title: str) -> List[str]:
+    """제목에서 한국어/영어/원제 등 비교 가능한 핵심 조각을 추출 (정규화)"""
+    if not title:
+        return []
+    raw_parts = re.split(r"[()/|·•:\[\]]+", title)
+    parts = []
+    for p in raw_parts:
+        norm = re.sub(r"[^a-z0-9가-힣ぁ-んァ-ヶ一-龥]", "", p.lower())
+        if len(norm) >= 3:
+            parts.append(norm)
+    full_norm = re.sub(r"[^a-z0-9가-힣ぁ-んァ-ヶ一-龥]", "", title.lower())
+    if len(full_norm) >= 3 and full_norm not in parts:
+        parts.append(full_norm)
+    return parts
+
+
+def is_duplicate_work(cand_title: str, existing_titles: List[str]) -> Optional[str]:
+    """후보 작품이 기존 목록과 중복이면 매칭된 기존 제목을 반환, 아니면 None 반환"""
+    cand_parts = _extract_title_parts(cand_title)
+    if not cand_parts:
+        return None
+    for exist in existing_titles:
+        exist_parts = _extract_title_parts(exist)
+        for cp in cand_parts:
+            for ep in exist_parts:
+                if cp == ep:
+                    return exist
+                if len(cp) >= 5 and len(ep) >= 5 and (cp in ep or ep in cp):
+                    return exist
+    return None
+
 WUXIA_STRICT_SYSTEM_INSTRUCTION = """
 당신은 정통무협(正統武俠) 웹소설 집필을 위한 에피소드 기획 수석 작가입니다.
 
@@ -148,9 +180,13 @@ class StoryHunterPipeline:
         raise RuntimeError(f"모든 모델 호출 및 재시도 실패. 마지막 에러: {last_error}")
 
     # 1. 작품 발굴 및 추천
-    def discover_works(self, theme_or_genre: Optional[str] = None, count: int = 3) -> List[Dict[str, Any]]:
+    def discover_works(self, theme_or_genre: Optional[str] = None, count: int = 3, extra_exclude: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         history = self.get_history()
-        history_str = ", ".join(history[-30:]) if history else "없음"
+        combined = []
+        for t in (history + (extra_exclude or [])):
+            if t and t not in combined:
+                combined.append(t)
+        history_str = ", ".join(combined[-150:]) if combined else "없음"
 
         prompt = f"""
 웹소설 에피소드 소스로 활용하기에 뛰어난 다양한 장르와 매체의 숨은 작품 {count}개를 발굴하고 추천해주세요.

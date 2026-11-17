@@ -918,6 +918,34 @@
     item.innerHTML = htmlText;
   }
 
+  function extractTitleParts(title) {
+    if (!title) return [];
+    const rawParts = title.split(/[()/|·•:\[\]]+/);
+    const parts = [];
+    for (const p of rawParts) {
+      const norm = p.toLowerCase().replace(/[^a-z0-9가-힣ぁ-んァ-ヶ一-龥]/g, "");
+      if (norm.length >= 3) parts.push(norm);
+    }
+    const fullNorm = title.toLowerCase().replace(/[^a-z0-9가-힣ぁ-んァ-ヶ一-龥]/g, "");
+    if (fullNorm.length >= 3 && !parts.includes(fullNorm)) parts.push(fullNorm);
+    return parts;
+  }
+
+  function findDuplicateWork(candTitle, existingList) {
+    const candParts = extractTitleParts(candTitle);
+    if (!candParts.length) return null;
+    for (const exist of existingList) {
+      const existParts = extractTitleParts(exist);
+      for (const cp of candParts) {
+        for (const ep of existParts) {
+          if (cp === ep) return exist;
+          if (cp.length >= 5 && ep.length >= 5 && (cp.includes(ep) || ep.includes(cp))) return exist;
+        }
+      }
+    }
+    return null;
+  }
+
   function parseJsonSafely(text) {
     let clean = text.trim();
     if (clean.includes("```json")) clean = clean.split("```json")[1].split("```")[0].trim();
@@ -961,12 +989,13 @@
     try {
       const apiKey = await getGeminiApiKey();
 
-      // 기존 발굴된 작품 목록 제외 (중복 발굴 100% 방지)
-      const existingTitles = archiveReports.map(r => r.title).filter(Boolean).slice(0, 40).join(', ');
+      // 기존 발굴된 작품 목록 전체 로드 (수동/자동 합산 중복 발굴 100% 방지)
+      const allExistingList = archiveReports.map(r => r.title).filter(Boolean);
+      const existingTitles = allExistingList.join(', ');
 
       let work = null;
       let verifData = null;
-      const maxAttempts = 3;
+      const maxAttempts = 5;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const suffix = attempt > 1 ? ` (재시도 ${attempt})` : '';
@@ -998,6 +1027,19 @@
         const discResult = await callGeminiDirect(apiKey, discPrompt, null, "gemini-3.5-flash-lite");
         const candWork = parseJsonSafely(discResult.text);
         const s1Sec = ((Date.now() - s1Start) / 1000).toFixed(1);
+
+        // 1차 코드 레벨 중복 차단
+        const dup1 = findDuplicateWork(candWork.title, allExistingList);
+        if (dup1) {
+          appendDiscoverLog(
+            `log-s1-${attempt}`,
+            `<span>🔄</span><div><strong>[1단계 중복 차단${suffix}]</strong> <span style="color:#d97706;font-weight:700;">(${s1Sec}초)</span> — "${candWork.title}" ↔ 기존 "${dup1}" 중복 → <em>Gemini 4 쿼터 0회 소모, 새 작품 재탐색</em></div>`,
+            '#fffbeb'
+          );
+          allExistingList.push(candWork.title);
+          continue;
+        }
+
         appendDiscoverLog(
           `log-s1-${attempt}`,
           `<span>✅</span><div><strong>[1단계 발굴 완료${suffix}]</strong> <span style="color:#2563eb;font-weight:700;">(${s1Sec}초)</span> — 후보: <strong>${candWork.title}</strong> (${candWork.media || ''}, ${candWork.year || ''})</div>`,
@@ -1029,12 +1071,25 @@
         const s15Sec = ((Date.now() - s15Start) / 1000).toFixed(1);
 
         if (candVerif && candVerif.is_valid !== false) {
+          const canonicalCand = candVerif.canonical_title || candWork.title;
+          // 2차 코드 레벨 중복 차단 (공식 원제 정규화 후 재검사)
+          const dup2 = findDuplicateWork(canonicalCand, allExistingList);
+          if (dup2) {
+            appendDiscoverLog(
+              `log-s15-${attempt}`,
+              `<span>🔄</span><div><strong>[1.5단계 중복 차단${suffix}]</strong> <span style="color:#d97706;font-weight:700;">(${s15Sec}초)</span> — "${canonicalCand}" ↔ 기존 "${dup2}" 중복 → <em>Gemini 4 쿼터 0회 소모, 새 작품 재탐색</em></div>`,
+              '#fffbeb'
+            );
+            allExistingList.push(canonicalCand);
+            continue;
+          }
+
           work = candWork;
           verifData = candVerif;
           const refCount = (candVerif.reference_sources || []).length;
           appendDiscoverLog(
             `log-s15-${attempt}`,
-            `<span>✅</span><div><strong>[1.5단계 검증 완료]</strong> <span style="color:#2563eb;font-weight:700;">(${s15Sec}초)</span> — 실존 확인: <strong>${candVerif.canonical_title || candWork.title}</strong> (원작: ${candVerif.creator_or_author || '확인됨'}, 출처 ${refCount}건 확보)</div>`,
+            `<span>✅</span><div><strong>[1.5단계 검증 완료]</strong> <span style="color:#2563eb;font-weight:700;">(${s15Sec}초)</span> — 실존 확인: <strong>${canonicalCand}</strong> (원작: ${candVerif.creator_or_author || '확인됨'}, 출처 ${refCount}건 확보)</div>`,
             '#f0fdf4'
           );
           break;
