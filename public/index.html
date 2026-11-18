@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>스토리 헌터 - 정통무협 웹소설 에피소드 발굴기</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231e3a8a'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='%23f59e0b' stroke-width='3'/%3E%3Cpath d='M32 8v10M32 46v10M8 32h10M46 32h10' stroke='%23f59e0b' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M22 25c4-2 8-1 10 2 2-3 6-4 10-2v15c-4-2-8-1-10 2-2-3-6-4-10-2V25z' fill='%23ffffff'/%3E%3C/svg%3E" />
 
   <!-- Astryx Design System & Theme Foundations -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -115,13 +116,24 @@
     .hero-banner h1 {
       font-size: 1.85rem;
       font-weight: 800;
-      margin: 0 0 0.4rem;
+      margin: 0 0 0.25rem;
       letter-spacing: -0.02em;
     }
     .hero-banner p {
       font-size: 0.98rem;
       color: #cbd5e1;
       margin: 0;
+    }
+    .brand-home-link {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      user-select: none;
+      transition: opacity 0.15s ease;
+    }
+    .brand-home-link:hover {
+      opacity: 0.88;
     }
 
     .user-profile-badge {
@@ -419,7 +431,14 @@
 <!-- 2. 로그인 화면 (허용 계정 전용) -->
 <div id="auth-login" style="display: none;">
   <div class="auth-card">
-    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🗡️</div>
+    <div style="margin: 0 auto 0.85rem; width: 56px; height: 56px;">
+      <svg viewBox="0 0 64 64" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="64" rx="14" fill="#1e3a8a"/>
+        <circle cx="32" cy="32" r="18" fill="none" stroke="#f59e0b" stroke-width="3"/>
+        <path d="M32 8v10M32 46v10M8 32h10M46 32h10" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"/>
+        <path d="M22 25c4-2 8-1 10 2 2-3 6-4 10-2v15c-4-2-8-1-10 2-2-3-6-4-10-2V25z" fill="#ffffff"/>
+      </svg>
+    </div>
     <h2 style="margin: 0 0 0.5rem; color: #1e3a8a;">스토리 헌터</h2>
     <p style="font-size: 0.92rem; color: var(--text-muted); margin-bottom: 2rem;">
       웹소설 정통무협 에피소드 발굴 시스템<br />
@@ -451,23 +470,33 @@
   <div class="app-container">
     <!-- Hero Banner -->
     <header class="hero-banner">
-      <div>
-        <h1>⚔️ 스토리 헌터 (클라우드)</h1>
-        <p>전 세계 다양한 장르·매체의 걸작 서사를 정통무협 웹소설 소재로 치환합니다.</p>
+      <div class="brand-home-link" onclick="window.location.reload()" title="스토리 헌터 홈 / 새로고침">
+        <svg viewBox="0 0 64 64" width="44" height="44" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));">
+          <rect width="64" height="64" rx="14" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.22)" stroke-width="2"/>
+          <circle cx="32" cy="32" r="18" fill="none" stroke="#fbbf24" stroke-width="3"/>
+          <path d="M32 8v10M32 46v10M8 32h10M46 32h10" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/>
+          <path d="M22 25c4-2 8-1 10 2 2-3 6-4 10-2v15c-4-2-8-1-10 2-2-3-6-4-10-2V25z" fill="#ffffff"/>
+        </svg>
+        <div>
+          <h1>스토리 헌터</h1>
+          <p>전 세계 다양한 장르·매체의 걸작 서사를 정통무협 웹소설 소재로 치환합니다.</p>
+        </div>
       </div>
       <div class="user-profile-badge">
-        <span>👤 <strong id="user-email-display">mirage13hy@gmail.com</strong></span>
+        <span>🟢 로그인 중</span>
         <button onclick="configureGeminiApiKey()" title="비공개 Gemini API 키 등록/변경">🔑 API 키</button>
         <button onclick="signOut()">로그아웃</button>
       </div>
     </header>
 
-    <!-- 4개 탭 구성 (수정요청 완벽 반영) -->
+    <!-- 탭 구성 -->
     <nav class="tab-nav">
       <button class="tab-btn active" onclick="switchTab('tab-discover')">🔍 1. 작품 발굴 및 선택</button>
+      <!-- [비활성화됨] 직접 작품 입력 탭
       <button class="tab-btn" onclick="switchTab('tab-custom')">✍️ 2. 직접 작품 입력</button>
-      <button class="tab-btn" onclick="switchTab('tab-all-archive')">📂 3. 전체 무협 아카이브 (<span id="tab-all-count">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tab-adopted-archive')">⭐ 4. 채택된 에피소드 보관함 (<span id="tab-adopted-count">0</span>)</button>
+      -->
+      <button class="tab-btn" onclick="switchTab('tab-all-archive')">📂 2. 전체 무협 아카이브 (<span id="tab-all-count">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tab-adopted-archive')">⭐ 3. 채택된 에피소드 보관함 (<span id="tab-adopted-count">0</span>)</button>
     </nav>
 
     <!-- Tab 1: 작품 발굴 및 원스톱 무협 치환 -->
@@ -503,7 +532,7 @@
         </div>
 
         <div style="margin-top: 1rem; padding-top: 0.8rem; border-top: 1px dashed #cbd5e1; font-size: 0.85rem; color: #3b82f6; display: flex; align-items: center; gap: 0.5rem;">
-          <span>⏰ <strong>클라우드 자동 스케줄 가동 중</strong>: 하루 6회 (새벽 12:50, 02:15, 04:30, 06:15, 낮 11:30, 오후 14:15) 클라우드가 스스로 1작품씩 발굴하여 <strong>[3. 전체 무협 아카이브]</strong>에 누적 보관합니다. (최대 120개 보관)</span>
+          <span>⏰ <strong>클라우드 자동 스케줄 가동 중</strong>: 하루 6회 (새벽 12:50, 02:15, 04:30, 06:15, 낮 11:30, 오후 14:15) 클라우드가 스스로 1작품씩 발굴하여 <strong>[2. 전체 무협 아카이브]</strong>에 누적 보관합니다. (최대 120개 보관)</span>
         </div>
       </div>
 
@@ -549,7 +578,7 @@
       </details>
     </section>
 
-    <!-- Tab 2: 직접 작품 입력 -->
+    <!-- [비활성화됨] Tab 2: 직접 작품 입력
     <section id="tab-custom" class="tab-pane">
       <div class="card">
         <h3 style="margin-top: 0;">알고 있는 작품 직접 분석 및 변환하기</h3>
@@ -572,6 +601,7 @@
         </button>
       </div>
     </section>
+    -->
 
     <!-- Tab 3: 전체 무협 아카이브 (모든 변환작 누적 + 채택 버튼) -->
     <section id="tab-all-archive" class="tab-pane">
@@ -660,6 +690,30 @@
   </div>
 </div>
 
+<!-- API Key Modal -->
+<div id="api-key-modal" class="modal-backdrop" style="z-index: 1050;">
+  <div class="modal-box" style="max-width: 460px; padding: 1.8rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <h3 style="margin: 0; color: #1e3a8a;">🔑 Gemini API 키 관리</h3>
+      <button class="btn btn-secondary" style="padding: 0.35rem 0.7rem;" onclick="closeApiKeyModal()">✕</button>
+    </div>
+    <div id="api-key-status-box" style="padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.88rem; margin-bottom: 1rem; line-height: 1.45;"></div>
+    <div class="form-group" style="margin-bottom: 1rem;">
+      <label style="font-size: 0.88rem;">Gemini API 키 (본인 계정 비공개 클라우드 금고 저장)</label>
+      <input type="password" id="api-key-modal-input" class="form-control" placeholder="AIzaSy... (미등록 시 빈 칸)" autocomplete="off"
+             oninput="this.dataset.dirty = 'true'"
+             onfocus="if (this.dataset.masked === 'true' && this.dataset.dirty !== 'true') { this.value = ''; this.dataset.dirty = 'true'; }" />
+      <p style="margin: 0.45rem 0 0; font-size: 0.78rem; color: var(--text-muted);">
+        ※ 이미 키가 등록된 경우 보안을 위해 <code>••••</code>로 비공개 표시됩니다. 새 키로 교체할 때만 입력해 주세요.
+      </p>
+    </div>
+    <div style="display: flex; gap: 0.6rem; justify-content: flex-end;">
+      <button class="btn btn-secondary" onclick="closeApiKeyModal()">닫기</button>
+      <button class="btn btn-primary" onclick="saveApiKeyFromModal()">저장하기</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // ========== 1. Firebase 인증 및 실시간 클라우드 DB ==========
   const FIREBASE_CONFIG = {
@@ -701,9 +755,9 @@
     document.getElementById('auth-login').style.display = 'none';
     document.getElementById('auth-denied').style.display = 'none';
     document.getElementById('main-app').style.display = 'block';
-    document.getElementById('user-email-display').innerText = user.email;
 
     loadArchiveFromFirebase();
+    preloadGeminiApiKey();
   });
 
   function signInWithGoogle() {
@@ -729,9 +783,11 @@
   function switchTab(tabId) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-    event.currentTarget.classList.add('active');
-    document.getElementById(tabId).classList.add('active');
-    
+    const targetBtn = document.querySelector(`.tab-btn[onclick*="${tabId}"]`);
+    if (targetBtn) targetBtn.classList.add('active');
+    const targetPane = document.getElementById(tabId);
+    if (targetPane) targetPane.classList.add('active');
+
     if (tabId === 'tab-all-archive') renderAllArchiveList();
     if (tabId === 'tab-adopted-archive') renderAdoptedArchiveList();
   }
@@ -801,29 +857,10 @@
   // ========== 3. 브라우저 직접 호출 엔진 (비공개 Firebase 보안 금고 연동 - 서버리스 한도 완전 독립) ==========
   let cachedApiKey = null;
   let latestReport = null;
+  let pendingApiKeyResolver = null;
 
-  async function configureGeminiApiKey() {
-    const currentMask = cachedApiKey ? `${cachedApiKey.slice(0, 8)}...` : '미설정';
-    const input = prompt(
-      `[비공개 Gemini API 키 설정] (현재 상태: ${currentMask})\nGoogle AI Studio에서 발급받은 Gemini API 키를 입력해 주세요.\n※ 입력한 키는 본인 구글 계정(mirage13hy@gmail.com) 전용 비공개 Firebase DB에만 안전하게 저장됩니다.`
-    );
-    if (!input || !input.trim()) return null;
-    const cleanKey = input.trim();
-    cachedApiKey = cleanKey;
-    localStorage.setItem('story_hunter_api_key', cleanKey);
-    try {
-      await db.ref('story_hunter_private/gemini_api_key').set(cleanKey);
-      alert('✅ Gemini API 키가 비공개 클라우드에 안전하게 저장되었습니다!');
-    } catch (e) {
-      alert('⚠️ 클라우드 금고 저장 권한이 없어 브라우저에 임시 저장했습니다. (Firebase 보안 규칙 확인 필요)');
-    }
-    return cleanKey;
-  }
-
-  async function getGeminiApiKey() {
+  async function preloadGeminiApiKey() {
     if (cachedApiKey) return cachedApiKey;
-
-    // 1순위: 로그인한 본인 계정 전용 Firebase 비공개 경로에서 안전하게 로드
     try {
       const snap = await db.ref('story_hunter_private/gemini_api_key').once('value');
       const val = snap.val();
@@ -835,15 +872,88 @@
     } catch (e) {
       console.warn('비공개 금고 조회 예외:', e);
     }
-
-    // 2순위: 브라우저 로컬 캐시 확인
     const localKey = localStorage.getItem('story_hunter_api_key');
     if (localKey && localKey.trim()) {
       cachedApiKey = localKey.trim();
       return cachedApiKey;
     }
+    return null;
+  }
 
-    // 3순위: 최초 1회 사용자 입력 요청 후 비공개 DB에 영구 보관
+  async function configureGeminiApiKey() {
+    await preloadGeminiApiKey();
+
+    const modal = document.getElementById('api-key-modal');
+    const statusBox = document.getElementById('api-key-status-box');
+    const inputEl = document.getElementById('api-key-modal-input');
+
+    if (cachedApiKey) {
+      const prefix = cachedApiKey.slice(0, 6);
+      statusBox.style.cssText = 'padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.88rem; margin-bottom: 1rem; line-height: 1.45; background: #f0fdf4; border: 1px solid #86efac; color: #166534;';
+      statusBox.innerHTML = `✅ <strong>등록 완료</strong> — 비공개 클라우드 금고에 API 키가 저장되어 있습니다. (<code>${prefix}••••••••••••</code>)`;
+      inputEl.value = '••••••••••••••••••••••••••••••••';
+      inputEl.dataset.masked = 'true';
+      inputEl.dataset.dirty = 'false';
+    } else {
+      statusBox.style.cssText = 'padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.88rem; margin-bottom: 1rem; line-height: 1.45; background: #fffbeb; border: 1px solid #fcd34d; color: #92400e;';
+      statusBox.innerHTML = `⚠️ <strong>미등록 상태</strong> — Google AI Studio에서 발급받은 Gemini API 키를 입력해 주세요.`;
+      inputEl.value = '';
+      inputEl.dataset.masked = 'false';
+      inputEl.dataset.dirty = 'true';
+    }
+
+    modal.classList.add('active');
+    return new Promise(resolve => {
+      pendingApiKeyResolver = resolve;
+    });
+  }
+
+  function closeApiKeyModal() {
+    document.getElementById('api-key-modal').classList.remove('active');
+    if (pendingApiKeyResolver) {
+      const res = pendingApiKeyResolver;
+      pendingApiKeyResolver = null;
+      res(cachedApiKey || null);
+    }
+  }
+
+  async function saveApiKeyFromModal() {
+    const inputEl = document.getElementById('api-key-modal-input');
+    const rawVal = inputEl.value.trim();
+
+    // 이미 등록된 키에서 마스킹(••••) 상태 그대로 저장 버튼을 누른 경우 기존 키 유지
+    if (inputEl.dataset.masked === 'true' && inputEl.dataset.dirty !== 'true' && cachedApiKey) {
+      closeApiKeyModal();
+      return;
+    }
+
+    if (!rawVal) {
+      alert('Gemini API 키를 입력해 주세요.');
+      return;
+    }
+
+    cachedApiKey = rawVal;
+    localStorage.setItem('story_hunter_api_key', rawVal);
+    try {
+      await db.ref('story_hunter_private/gemini_api_key').set(rawVal);
+      alert('✅ Gemini API 키가 비공개 클라우드에 안전하게 저장되었습니다!');
+    } catch (e) {
+      alert('⚠️ 클라우드 금고 저장 권한이 없어 브라우저에 임시 저장했습니다. (Firebase 보안 규칙 확인 필요)');
+    }
+
+    document.getElementById('api-key-modal').classList.remove('active');
+    if (pendingApiKeyResolver) {
+      const res = pendingApiKeyResolver;
+      pendingApiKeyResolver = null;
+      res(cachedApiKey);
+    }
+  }
+
+  async function getGeminiApiKey() {
+    const existing = await preloadGeminiApiKey();
+    if (existing) return existing;
+
+    // 최초 1회 사용자 입력 모달 요청
     const newKey = await configureGeminiApiKey();
     if (!newKey) throw new Error("Gemini API 키가 설정되지 않았습니다. 상단의 [🔑 API 키] 버튼을 눌러 키를 등록해 주세요.");
     return newKey;
@@ -1431,10 +1541,11 @@ ${work.summary || ""}
 
     btn.disabled = false;
     btn.innerHTML = `⚡ 선택한 ${sorted.length}개 작품 변환 완료!`;
-    alert(`선택한 ${sorted.length}개 작품의 정통무협 변환이 완료되었습니다!\n상단 [3. 전체 무협 아카이브] 탭에서 확인하고 채택하세요.`);
+    alert(`선택한 ${sorted.length}개 작품의 정통무협 변환이 완료되었습니다!\n상단 [2. 전체 무협 아카이브] 탭에서 확인하고 채택하세요.`);
     switchTab('tab-all-archive');
   }
 
+  /* [비활성화됨] 직접 작품 입력 기능
   async function adaptCustomWork() {
     const title = document.getElementById('custom-title').value.trim();
     const desc = document.getElementById('custom-desc').value.trim();
@@ -1465,6 +1576,7 @@ ${work.summary || ""}
       openModal(resData.reportId, work.title, resData.markdown);
     }
   }
+  */
 
   async function runSingleAdaptation(work) {
     try {
