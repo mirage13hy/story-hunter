@@ -959,7 +959,7 @@
     return newKey;
   }
 
-  // 브라우저 ➡️ 구글 API 직통 호출 (90초 응답 타임아웃 보호 + 429 일일 한도 즉시 폴백)
+  // 브라우저 ➡️ 구글 API 직통 호출 (심층 모델 장시간 추론 대기 허용 + 429 일일 한도 즉시 폴백)
   async function callGeminiDirect(apiKey, prompt, systemInstruction = null, primaryModel = "gemini-4-hydrogen") {
     const modelsToTry = [primaryModel];
     // 경량 모델(발굴/검증)은 경량 라인업으로만 폴백하여 Gemini 4 Hydrogen 쿼터 절대 보호
@@ -973,8 +973,6 @@
     let lastErr = null;
     for (const model of modelsToTry) {
       for (let attempt = 0; attempt < 3; attempt++) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90초 응답 지연 시 무한 대기 방지
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
           const body = {
@@ -991,10 +989,8 @@
           const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-            signal: controller.signal
+            body: JSON.stringify(body)
           });
-          clearTimeout(timeoutId);
 
           if (!res.ok) {
             const errText = await res.text();
@@ -1013,10 +1009,7 @@
           const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text) return { text, usedModel: model };
         } catch (e) {
-          clearTimeout(timeoutId);
-          lastErr = (e.name === 'AbortError')
-            ? new Error(`모델(${model}) 90초 응답 타임아웃으로 연결을 재시도합니다.`)
-            : e;
+          lastErr = e;
           await new Promise(r => setTimeout(r, 3000));
         }
       }
