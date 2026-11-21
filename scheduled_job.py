@@ -13,13 +13,14 @@ import random
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 load_dotenv()
 
 KST = timezone(timedelta(hours=9))
 
-from pipeline import StoryHunterPipeline, DISCOVERY_MODEL, ADAPTATION_MODEL, WUXIA_STRICT_SYSTEM_INSTRUCTION, is_duplicate_work
+from pipeline import StoryHunterPipeline, DISCOVERY_MODEL, ADAPTATION_MODEL, WUXIA_STRICT_SYSTEM_INSTRUCTION, is_duplicate_work, DailyQuotaExhaustedError
 
 FIREBASE_DATABASE_URL = "https://kids-location-check-default-rtdb.firebaseio.com"
 
@@ -133,10 +134,58 @@ def fetch_existing_titles_from_firebase() -> list:
         return []
 
 
+def get_next_pacific_reset_info() -> dict:
+    """구글 Gemini 일일 한도 초기화 시각(미국 태평양 자정 + 여유 5분 → 겨울 17:05 / 여름 16:05 KST) 계산"""
+    try:
+        pt_now = datetime.now(ZoneInfo("America/Los_Angeles"))
+        next_midnight = (pt_now + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+        kst_reset = next_midnight.astimezone(KST)
+    except Exception:
+        kst_now = datetime.now(KST)
+        target = kst_now.replace(hour=17, minute=5, second=0, microsecond=0)
+        kst_reset = target if kst_now < target else (target + timedelta(days=1))
+    return {
+        "until_ms": int(kst_reset.timestamp() * 1000),
+        "until_kst": kst_reset.strftime("%Y-%m-%d %H:%M:%S KST"),
+    }
+
+
+def check_quota_pause_until() -> str:
+    """일일 한도 소진으로 인한 자동 대기 상태 여부 확인 (대기 중이면 해제 시각 문자열 반환, 아니면 빈 문자열)"""
+    try:
+        _, data = _firebase_request("story_hunter_private/pause_until.json", method="GET", timeout=10)
+        if isinstance(data, dict) and data.get("until_ms", 0) > int(time.time() * 1000):
+            return data.get("until_kst", "다음 리셋 시각")
+    except Exception:
+        pass
+    return ""
+
+
+def set_quota_pause_until(reason: str):
+    """Gemini 4 Hydrogen 일일 한도 소진 시 다음 태평양 자정(오후 4~5시 KST)까지 자동 대기 기록"""
+    reset_info = get_next_pacific_reset_info()
+    payload = {
+        **reset_info,
+        "reason": str(reason)[:500],
+        "updated_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST"),
+    }
+    try:
+        _firebase_request("story_hunter_private/pause_until.json", method="PUT", payload=payload, timeout=10)
+        print(f">> [자동 대기 등록 완료] {reset_info['until_kst']}까지 나머지 회차는 API 호출 없이 건너뜁니다.")
+    except Exception as e:
+        print(f"!! 자동 대기 기록 실패: {e}")
+
+
 def run_single_auto_pipeline():
     print("=" * 65)
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 정기 자동 발굴 & 무협 치환 워커 시작 (1작품 완결형)")
     print("=" * 65)
+
+    paused_until = check_quota_pause_until()
+    if paused_until:
+        print(f">> [일일 한도 리셋 대기 중] {paused_until}까지 일시 정지 설정됨 → Gemini API 호출 없이 정상 종료합니다.")
+        print("=" * 65)
+        return
 
     pipeline = StoryHunterPipeline(storage_dir="storage")
 
@@ -260,6 +309,12 @@ def run_single_auto_pipeline():
             temperature=0.75
         )
         combined_data = pipeline._parse_json_from_response(response_text)
+    except DailyQuotaExhaustedError as qe:
+        print(f"\n>> [Gemini 4 Hydrogen 일일 한도 소진]: {qe}")
+        set_quota_pause_until(str(qe))
+        print(">> 하위 모델로 전환하지 않고 다음 리셋 시각까지 이번 회차를 정상 종료합니다.")
+        print("=" * 65)
+        return
     except Exception as e:
         log_run_failure("2단계 서사 분석 & 무협 치환", e)
 

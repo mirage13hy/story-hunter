@@ -16,8 +16,14 @@ from google.genai import types
 
 DISCOVERY_MODEL = "gemini-3.5-flash-lite"
 ADAPTATION_MODEL = "gemini-4-hydrogen"
-FALLBACK_ADAPTATION_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+# 정통무협 치환은 고품질 유지를 위해 오직 Gemini 4 Hydrogen 단독 사용 (하위 모델 폴백 금지)
+FALLBACK_ADAPTATION_MODELS = []
 FALLBACK_DISCOVERY_MODELS = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
+
+
+class DailyQuotaExhaustedError(RuntimeError):
+    """Gemini 4 Hydrogen 일일 한도(RPD) 소진 시 하위 모델 전환 없이 즉시 중단하기 위한 예외"""
+    pass
 
 
 def _is_daily_quota_error(err_msg: str) -> bool:
@@ -114,11 +120,9 @@ class StoryHunterPipeline:
 
     def _generate_with_retry(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.7, model: str = ADAPTATION_MODEL) -> str:
         """
-        API 오류 및 할당량 제한에 유연하게 대처하는 스마트 재시도 & 다계층 폴백 함수:
-        1순위: Gemini 4 Hydrogen (초고품질 서사 치환)
-        2순위: Gemini 3.8 Flash (최신 고속 모델)
-        3순위: Gemini 3.5 Flash (안정적 백업)
-        4순위: Gemini 3.5 Flash Lite (최종 안전망)
+        API 오류 및 할당량 제한 대응 함수:
+        - 정통무협 치환(ADAPTATION_MODEL): 오직 Gemini 4 Hydrogen 단독 사용 (하위 모델 폴백 금지, 일일 한도 소진 시 즉시 중단)
+        - 발굴/검증(DISCOVERY_MODEL): 경량 라인업 내에서만 폴백 (Hydrogen 쿼터 보호)
         """
         models_to_try = [model]
         if model == ADAPTATION_MODEL:
@@ -155,10 +159,13 @@ class StoryHunterPipeline:
                     print(f"!! [API 경고 - 시도 {attempt + 1}/{max_attempts}] 모델({current_model}) 호출 실패: {e}")
 
                     # 1. 429 할당량 초과: '하루 한도'인지 '분당 한도'인지 정확히 구분
-                    #    (구글 오류에는 거의 항상 'limit' 단어가 들어가므로 그것만으로 판단하면 안 됨)
                     if "429" in err_msg or "resource_exhausted" in err_msg:
                         if _is_daily_quota_error(err_msg):
-                            print(">> 하루 사용 한도(RPD) 소진 감지 → 다음 모델로 즉시 전환합니다.")
+                            if current_model == ADAPTATION_MODEL:
+                                raise DailyQuotaExhaustedError(
+                                    f"Gemini 4 Hydrogen 일일 할당량(20회) 소진! 하위 모델로 전환하지 않고 다음 리셋(오후 4~5시)까지 중단합니다. ({e})"
+                                )
+                            print(">> 경량 모델 일일 한도(RPD) 소진 감지 → 다음 경량 모델로 전환합니다.")
                             break
                         wait_sec = _retry_delay_seconds(err_msg, default=60)
                         print(f">> 분당 한도(RPM/TPM) 초과 → {wait_sec}초 기다린 뒤 같은 모델로 재시도합니다...")
