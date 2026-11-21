@@ -959,7 +959,7 @@
     return newKey;
   }
 
-  // 브라우저 ➡️ 구글 API 직통 호출 (30~60초가 걸려도 504 타임아웃 절대 없음!)
+  // 브라우저 ➡️ 구글 API 직통 호출 (90초 응답 타임아웃 보호 + 429 일일 한도 즉시 폴백)
   async function callGeminiDirect(apiKey, prompt, systemInstruction = null, primaryModel = "gemini-4-hydrogen") {
     const modelsToTry = [primaryModel];
     // 경량 모델(발굴/검증)은 경량 라인업으로만 폴백하여 Gemini 4 Hydrogen 쿼터 절대 보호
@@ -973,6 +973,8 @@
     let lastErr = null;
     for (const model of modelsToTry) {
       for (let attempt = 0; attempt < 3; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90초 응답 지연 시 무한 대기 방지
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
           const body = {
@@ -989,13 +991,19 @@
           const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
 
           if (!res.ok) {
             const errText = await res.text();
-            // 429 분당 한도 초과 시 쿨다운 대기
+            const lowerErr = errText.toLowerCase();
             if (res.status === 429) {
+              if (lowerErr.includes("perday") || lowerErr.includes("per day") || lowerErr.includes("requests per day")) {
+                lastErr = new Error(`(${res.status}) 일일 한도 소진: ${errText}`);
+                break; // 일일 한도 소진 시 같은 모델 재시도 없이 즉시 다음 모델로 전환
+              }
               await new Promise(r => setTimeout(r, 10000));
             }
             throw new Error(`(${res.status}) ${errText}`);
@@ -1005,7 +1013,10 @@
           const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text) return { text, usedModel: model };
         } catch (e) {
-          lastErr = e;
+          clearTimeout(timeoutId);
+          lastErr = (e.name === 'AbortError')
+            ? new Error(`모델(${model}) 90초 응답 타임아웃으로 연결을 재시도합니다.`)
+            : e;
           await new Promise(r => setTimeout(r, 3000));
         }
       }
@@ -1118,18 +1129,25 @@
     const startTimeMs = Date.now();
     let activeStep2StartMs = null;
 
+    totalTimerEl.innerText = '진행 중';
+    btn.innerHTML = `<span class="loading-spinner"></span> 1/1.5단계 탐색·검증 진행 중...`;
+
     const timerInterval = setInterval(() => {
-      const totalElapsed = ((Date.now() - startTimeMs) / 1000).toFixed(1);
-      totalTimerEl.innerText = `총 ${totalElapsed}초 경과`;
-      if (activeStep2StartMs) {
-        const step2Elapsed = ((Date.now() - activeStep2StartMs) / 1000).toFixed(1);
-        const step2El = document.getElementById('log-step2-timer');
-        if (step2El) step2El.innerText = `${step2Elapsed}초`;
-        btn.innerHTML = `<span class="loading-spinner"></span> 2단계 심층 치환 중... (${step2Elapsed}초)`;
-      } else {
-        btn.innerHTML = `<span class="loading-spinner"></span> 1/1.5단계 탐색·검증 중... (${totalElapsed}초)`;
+      const totalBucket = Math.floor((Date.now() - startTimeMs) / 10000) * 10;
+      if (totalBucket > 0) {
+        totalTimerEl.innerText = `${totalBucket}초 경과`;
       }
-    }, 100);
+      if (activeStep2StartMs) {
+        const s2Bucket = Math.floor((Date.now() - activeStep2StartMs) / 10000) * 10;
+        const s2Label = s2Bucket > 0 ? `${s2Bucket}초 경과` : '진행 중';
+        const step2El = document.getElementById('log-step2-timer');
+        if (step2El) step2El.innerText = s2Label;
+        btn.innerHTML = `<span class="loading-spinner"></span> 2단계 심층 치환 중 (${s2Label})`;
+      } else {
+        const s1Label = totalBucket > 0 ? `${totalBucket}초 경과` : '진행 중';
+        btn.innerHTML = `<span class="loading-spinner"></span> 1/1.5단계 탐색·검증 중 (${s1Label})`;
+      }
+    }, 10000);
 
     try {
       const apiKey = await getGeminiApiKey();
@@ -1155,6 +1173,7 @@
 - 최신 유행작이나 유명 대작에 편중되지 마십시오.
 - 시대를 초월한 고전 명작, 상업적 성공은 못했으나 스토리가 경이로운 숨은 명작, 소수 매니아의 컬트작, 인디 게임/콘솔 스토리, 해외 마이너 소설/만화 등 숨은 원석을 적극 발굴하십시오.
 - [실존 필수]: 절대로 가상의 작품이나 거짓 타이틀을 지어내지(환각) 마십시오. 반드시 실제로 제작/출간/방영/출시 또는 온라인(AO3, Royal Road, 레딧 등)에 연재된 '실존 작품'이어야 합니다.
+- [순수 제목만 기재]: "title" 필드에는 '~대신 추천하는' 같은 부연 설명을 절대 넣지 말고 오직 순수 작품 제목만 적으십시오.
 - [기존 발굴작 제외]: 다음 작품들은 이미 아카이브에 존재하므로 절대 제외하십시오: [${existingTitles || '없음'}]
 - 요청 테마/장르/키워드: ${activeTheme}
 `;
@@ -1258,9 +1277,10 @@
 
       // 2단계: 심층 서사 분석 및 정통무협 치환 (Gemini 4 Hydrogen 단 1회 통합 호출!)
       activeStep2StartMs = Date.now();
+      btn.innerHTML = `<span class="loading-spinner"></span> 2단계 심층 치환 중 (진행 중)`;
       appendDiscoverLog(
         `log-step2`,
-        `<span>⏳</span><div><strong>[2단계 심층 분석 & 무협 치환]</strong> <strong>Gemini 4 Hydrogen</strong> 실행 중... (<span id="log-step2-timer" style="color:#1e3a8a;font-weight:700;">0.0초</span> 경과)</div>`,
+        `<span>⏳</span><div><strong>[2단계 심층 분석 & 무협 치환]</strong> <strong>Gemini 4 Hydrogen</strong> 실행 중... (<span id="log-step2-timer" style="color:#1e3a8a;font-weight:700;">진행 중</span>)</div>`,
         '#eff6ff'
       );
 
