@@ -20,15 +20,7 @@ load_dotenv()
 
 KST = timezone(timedelta(hours=9))
 
-from pipeline import (
-    StoryHunterPipeline,
-    DISCOVERY_MODEL,
-    ADAPTATION_MODEL,
-    WUXIA_STRICT_SYSTEM_INSTRUCTION,
-    is_duplicate_work,
-    DailyQuotaExhaustedError,
-    AdaptationRetryExhaustedError,
-)
+from pipeline import StoryHunterPipeline, DISCOVERY_MODEL, ADAPTATION_MODEL, WUXIA_STRICT_SYSTEM_INSTRUCTION, is_duplicate_work, DailyQuotaExhaustedError
 
 FIREBASE_DATABASE_URL = "https://kids-location-check-default-rtdb.firebaseio.com"
 
@@ -321,26 +313,6 @@ def run_single_auto_pipeline():
         print(f"\n>> [Gemini 4 Hydrogen 일일 한도 소진]: {qe}")
         set_quota_pause_until(str(qe))
         print(">> 하위 모델로 전환하지 않고 다음 리셋 시각까지 이번 회차를 정상 종료합니다.")
-        print("=" * 65)
-        return
-    except AdaptationRetryExhaustedError as ae:
-        print(f"\n>> [Gemini 4 Hydrogen 장기 재시도(3분→5분→10분) 모두 실패]: {ae}")
-        set_quota_pause_until(str(ae))
-        try:
-            _firebase_request(
-                f"story_hunter/run_logs/pause_{int(time.time())}.json",
-                method="PUT",
-                payload={
-                    "time": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
-                    "stage": "2단계 503 장기 재시도 소진 (자동 일시정지)",
-                    "detail": str(ae)[:1500],
-                    "timestamp": int(time.time() * 1000),
-                },
-                timeout=10,
-            )
-        except Exception:
-            pass
-        print(">> 추가 할당량 소진을 막기 위해 다음 리셋 시각까지 자동 일시정지 상태로 전환 후 종료합니다.")
         print("=" * 65)
         return
     except Exception as e:

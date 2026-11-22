@@ -19,17 +19,10 @@ ADAPTATION_MODEL = "gemini-4-hydrogen"
 # 정통무협 치환은 고품질 유지를 위해 오직 Gemini 4 Hydrogen 단독 사용 (하위 모델 폴백 금지)
 FALLBACK_ADAPTATION_MODELS = []
 FALLBACK_DISCOVERY_MODELS = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
-# 자동화 워커에서 503 등 일시 장애 시 긴 쿨다운 재시도 간격: 3분 -> 5분 -> 10분
-HYDROGEN_RETRY_DELAYS = [180, 300, 600]
 
 
 class DailyQuotaExhaustedError(RuntimeError):
     """Gemini 4 Hydrogen 일일 한도(RPD) 소진 시 하위 모델 전환 없이 즉시 중단하기 위한 예외"""
-    pass
-
-
-class AdaptationRetryExhaustedError(RuntimeError):
-    """Gemini 4 Hydrogen 3분->5분->10분 장기 재시도까지 모두 실패했을 때 자동 일시정지를 트리거하기 위한 예외"""
     pass
 
 
@@ -147,8 +140,7 @@ class StoryHunterPipeline:
         last_error = None
         for current_model in models_to_try:
             print(f">> [호출 시도] 모델: {current_model}")
-            # Gemini 4 Hydrogen: 초기 1회 + 3분/5분/10분 후 재시도 3회 (총 4회)
-            max_attempts = (1 + len(HYDROGEN_RETRY_DELAYS)) if current_model == ADAPTATION_MODEL else 3
+            max_attempts = 4
             for attempt in range(max_attempts):
                 try:
                     config_args = {"temperature": temperature}
@@ -175,30 +167,19 @@ class StoryHunterPipeline:
                                 )
                             print(">> 경량 모델 일일 한도(RPD) 소진 감지 → 다음 경량 모델로 전환합니다.")
                             break
-                        if current_model != ADAPTATION_MODEL:
-                            wait_sec = _retry_delay_seconds(err_msg, default=60)
-                            print(f">> 분당 한도(RPM/TPM) 초과 → {wait_sec}초 기다린 뒤 같은 모델로 재시도합니다...")
-                            time.sleep(wait_sec)
-                            continue
+                        wait_sec = _retry_delay_seconds(err_msg, default=60)
+                        print(f">> 분당 한도(RPM/TPM) 초과 → {wait_sec}초 기다린 뒤 같은 모델로 재시도합니다...")
+                        time.sleep(wait_sec)
+                        continue
 
-                    # 2. Gemini 4 Hydrogen 장기 쿨다운 재시도 (503 등 일시 장애 시 3분 -> 5분 -> 10분)
-                    if current_model == ADAPTATION_MODEL:
-                        if attempt < len(HYDROGEN_RETRY_DELAYS):
-                            wait_sec = HYDROGEN_RETRY_DELAYS[attempt]
-                            print(f">> [503/일시 장애] {wait_sec // 60}분({wait_sec}초) 대기 후 재시도({attempt + 1}/{len(HYDROGEN_RETRY_DELAYS)})를 진행합니다...")
-                            time.sleep(wait_sec)
-                            continue
-                        raise AdaptationRetryExhaustedError(
-                            f"Gemini 4 Hydrogen 3분→5분→10분 재시도까지 모두 실패: {e}"
-                        )
-
+                    # 2. 503 서버 혼잡, 504 타임아웃, 502/500 일시적 장애
                     if any(code in err_msg for code in ["503", "504", "502", "500", "overloaded", "unavailable", "timeout", "busy"]):
                         wait_sec = (attempt + 1) * 15
                         print(f">> 구글 API 서버 혼잡/타임아웃: {wait_sec}초 대기 후 재시도합니다...")
                         time.sleep(wait_sec)
                         continue
 
-                    # 그 외 일반 에러도 경량 모델만 잠시 대기 후 재시도
+                    # 그 외 일반 에러도 잠시 대기 후 재시도
                     if attempt < max_attempts - 1:
                         time.sleep(5 * (attempt + 1))
 
