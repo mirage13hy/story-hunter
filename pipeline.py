@@ -16,13 +16,13 @@ from google.genai import types
 
 DISCOVERY_MODEL = "gemini-3.5-flash-lite"
 ADAPTATION_MODEL = "gemini-4-hydrogen"
-# 정통무협 치환은 고품질 유지를 위해 오직 Gemini 4 Hydrogen 단독 사용 (하위 모델 폴백 금지)
-FALLBACK_ADAPTATION_MODELS = []
+# 정통무협 치환: Gemini 4 Hydrogen 우선 -> 실패/한도 시 Gemini 3.8 Flash까지만 폴백 허용 (3.5 이하 저품질 폴백 금지)
+FALLBACK_ADAPTATION_MODELS = ["gemini-3.8-flash"]
 FALLBACK_DISCOVERY_MODELS = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
 
 
 class DailyQuotaExhaustedError(RuntimeError):
-    """Gemini 4 Hydrogen 일일 한도(RPD) 소진 시 하위 모델 전환 없이 즉시 중단하기 위한 예외"""
+    """허용된 치환 모델(Hydrogen 및 3.8 Flash)의 일일 한도(RPD)가 모두 소진되었을 때 발생"""
     pass
 
 
@@ -138,9 +138,14 @@ class StoryHunterPipeline:
             models_to_try.append(DISCOVERY_MODEL)
 
         last_error = None
+        all_daily_exhausted = False
+        adaptation_set = {ADAPTATION_MODEL, *FALLBACK_ADAPTATION_MODELS}
+
         for current_model in models_to_try:
             print(f">> [호출 시도] 모델: {current_model}")
-            max_attempts = 4
+            is_adaptation = current_model in adaptation_set
+            # 치환용 고위 모델(Hydrogen / 3.8 Flash)은 1차 시도 + 1분 대기 후 1회 재시도(최대 2회) 후 곧바로 폴백
+            max_attempts = 2 if is_adaptation else 3
             for attempt in range(max_attempts):
                 try:
                     config_args = {"temperature": temperature}
@@ -161,27 +166,41 @@ class StoryHunterPipeline:
                     # 1. 429 할당량 초과: '하루 한도'인지 '분당 한도'인지 정확히 구분
                     if "429" in err_msg or "resource_exhausted" in err_msg:
                         if _is_daily_quota_error(err_msg):
-                            if current_model == ADAPTATION_MODEL:
-                                raise DailyQuotaExhaustedError(
-                                    f"Gemini 4 Hydrogen 일일 할당량(20회) 소진! 하위 모델로 전환하지 않고 다음 리셋(오후 4~5시)까지 중단합니다. ({e})"
-                                )
-                            print(">> 경량 모델 일일 한도(RPD) 소진 감지 → 다음 경량 모델로 전환합니다.")
+                            all_daily_exhausted = True
+                            print(f">> [{current_model}] 일일 한도(RPD) 소진 감지 → 다음 허용 모델로 즉시 전환합니다.")
                             break
+                        all_daily_exhausted = False
                         wait_sec = _retry_delay_seconds(err_msg, default=60)
-                        print(f">> 분당 한도(RPM/TPM) 초과 → {wait_sec}초 기다린 뒤 같은 모델로 재시도합니다...")
-                        time.sleep(wait_sec)
-                        continue
+                        print(f">> 분당 한도(RPM/TPM) 초과 → {wait_sec}초 기다린 뒤 재시도합니다...")
+                        if attempt < max_attempts - 1:
+                            time.sleep(wait_sec)
+                            continue
+                        break
 
-                    # 2. 503 서버 혼잡, 504 타임아웃, 502/500 일시적 장애
+                    all_daily_exhausted = False
+                    # 2. 503 서버 혼잡, 504 타임아웃, 502/500 일시적 장애: 1분(60초) 대기 후 1회 재시도, 그래도 실패 시 폴백
+                    if is_adaptation:
+                        if attempt < max_attempts - 1:
+                            print(">> [503/일시 장애] 1분(60초) 대기 후 1회 재시도합니다...")
+                            time.sleep(60)
+                            continue
+                        print(f">> [{current_model}] 1분 대기 재시도 후에도 오류 발생 → 다음 허용 모델로 폴백합니다.")
+                        break
+
                     if any(code in err_msg for code in ["503", "504", "502", "500", "overloaded", "unavailable", "timeout", "busy"]):
                         wait_sec = (attempt + 1) * 15
                         print(f">> 구글 API 서버 혼잡/타임아웃: {wait_sec}초 대기 후 재시도합니다...")
                         time.sleep(wait_sec)
                         continue
 
-                    # 그 외 일반 에러도 잠시 대기 후 재시도
+                    # 그 외 일반 에러도 경량 모델만 잠시 대기 후 재시도
                     if attempt < max_attempts - 1:
                         time.sleep(5 * (attempt + 1))
+
+        if model == ADAPTATION_MODEL and all_daily_exhausted:
+            raise DailyQuotaExhaustedError(
+                f"허용된 치환 모델(Gemini 4 Hydrogen & 3.8 Flash)의 일일 한도가 모두 소진되었습니다. ({last_error})"
+            )
 
         # 모든 모델 및 재시도 실패 시 예외 발생
         raise RuntimeError(f"모든 모델 호출 및 재시도 실패. 마지막 에러: {last_error}")

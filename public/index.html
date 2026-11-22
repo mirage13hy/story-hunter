@@ -959,20 +959,30 @@
     return newKey;
   }
 
-  // 브라우저 ➡️ 구글 API 직통 호출 (무협 치환은 오직 Gemini 4 Hydrogen 단독 사용 · 일일 한도 소진 시 하위 모델 전환 없이 즉시 중단)
-  async function callGeminiDirect(apiKey, prompt, systemInstruction = null, primaryModel = "gemini-4-hydrogen") {
+  // 브라우저 ➡️ 구글 API 직통 호출 (무협 치환: Hydrogen 우선 -> 503 시 1분 대기 후 1회 재시도 -> 실패/한도 시 3.8 Flash까지만 폴백)
+  async function callGeminiDirect(apiKey, prompt, systemInstruction = null, primaryModel = "gemini-4-hydrogen", onStatus = null) {
     const modelsToTry = [primaryModel];
-    // 경량 모델(발굴/검증)만 경량 라인업 내 폴백 허용, 무협 치환(gemini-4-hydrogen)은 하위 모델 폴백 금지
-    const priorityChain = (primaryModel === "gemini-3.5-flash-lite")
+    const isDiscovery = (primaryModel === "gemini-3.5-flash-lite");
+    const priorityChain = isDiscovery
       ? ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
-      : ["gemini-4-hydrogen"];
+      : ["gemini-4-hydrogen", "gemini-3.8-flash"];
     for (const m of priorityChain) {
       if (!modelsToTry.includes(m)) modelsToTry.push(m);
     }
 
     let lastErr = null;
-    for (const model of modelsToTry) {
-      for (let attempt = 0; attempt < 3; attempt++) {
+    let lastWasDailyQuota = false;
+
+    for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
+      const model = modelsToTry[mIdx];
+      const isAdaptationModel = (model === "gemini-4-hydrogen" || model === "gemini-3.8-flash");
+      const maxAttempts = isAdaptationModel ? 2 : 3;
+
+      if (mIdx > 0 && onStatus && isAdaptationModel) {
+        onStatus(`<strong>${model}</strong>(으)로 폴백 전환하여 실행 중...`);
+      }
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
           const body = {
@@ -997,16 +1007,18 @@
             const lowerErr = errText.toLowerCase();
             if (res.status === 429) {
               if (lowerErr.includes("perday") || lowerErr.includes("per day") || lowerErr.includes("requests per day")) {
-                if (model === "gemini-4-hydrogen") {
-                  const dqErr = new Error("Gemini 4 Hydrogen 오늘 일일 할당량(20회)을 모두 소진했습니다. 하위 모델로 전환하지 않고 즉시 중단합니다. (오후 4~5시 리셋 이후 다시 시도해 주세요)");
-                  dqErr.isDailyQuota = true;
-                  throw dqErr;
-                }
-                lastErr = new Error(`(${res.status}) 경량 모델 일일 한도 소진: ${errText}`);
-                break; // 경량 모델만 다음 경량 모델로 전환
+                lastWasDailyQuota = true;
+                lastErr = new Error(`(${res.status}) ${model} 일일 한도 소진: ${errText}`);
+                break; // 일일 한도 소진 시 같은 모델 재시도 없이 즉시 다음 허용 모델로 전환
               }
-              await new Promise(r => setTimeout(r, 10000));
+              lastWasDailyQuota = false;
+              if (attempt < maxAttempts - 1) {
+                if (onStatus && isAdaptationModel) onStatus(`${model} 분당 한도(429) → 1분 대기 후 재시도 중...`);
+                await new Promise(r => setTimeout(r, isAdaptationModel ? 60000 : 10000));
+                continue;
+              }
             }
+            lastWasDailyQuota = false;
             throw new Error(`(${res.status}) ${errText}`);
           }
 
@@ -1014,11 +1026,21 @@
           const text = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text) return { text, usedModel: model };
         } catch (e) {
-          if (e.isDailyQuota) throw e;
           lastErr = e;
-          await new Promise(r => setTimeout(r, 3000));
+          if (attempt < maxAttempts - 1) {
+            if (isAdaptationModel) {
+              if (onStatus) onStatus(`${model} 일시 오류(${e.message.slice(0, 60)}) → 1분 대기 후 1회 재시도 중...`);
+              await new Promise(r => setTimeout(r, 60000));
+            } else {
+              await new Promise(r => setTimeout(r, 3000));
+            }
+          }
         }
       }
+    }
+
+    if (!isDiscovery && lastWasDailyQuota) {
+      throw new Error("Gemini 4 Hydrogen 및 3.8 Flash의 오늘 일일 할당량이 모두 소진되었습니다. (오후 4~5시 리셋 이후 다시 시도해 주세요)");
     }
     throw lastErr;
   }
@@ -1274,12 +1296,12 @@
       const creator = verifData.creator_or_author || '';
       const refSourcesStr = (verifData.reference_sources || []).map(s => `- ${s}`).join('\n');
 
-      // 2단계: 심층 서사 분석 및 정통무협 치환 (Gemini 4 Hydrogen 단 1회 통합 호출!)
+      // 2단계: 심층 서사 분석 및 정통무협 치환 (Gemini 4 Hydrogen 우선 -> 503 1분 대기 재시도 -> 3.8 Flash 폴백)
       activeStep2StartMs = Date.now();
       btn.innerHTML = `<span class="loading-spinner"></span> 2단계 심층 치환 중 (진행 중)`;
       appendDiscoverLog(
         `log-step2`,
-        `<span>⏳</span><div><strong>[2단계 심층 분석 & 무협 치환]</strong> <strong>Gemini 4 Hydrogen</strong> 실행 중... (<span id="log-step2-timer" style="color:#1e3a8a;font-weight:700;">진행 중</span>)</div>`,
+        `<span>⏳</span><div><strong>[2단계 심층 분석 & 무협 치환]</strong> <span id="log-step2-status"><strong>Gemini 4 Hydrogen</strong> 실행 중...</span> (<span id="log-step2-timer" style="color:#1e3a8a;font-weight:700;">진행 중</span>)</div>`,
         '#eff6ff'
       );
 
@@ -1328,7 +1350,10 @@ ${work.summary || ""}
     }
   ]
 }`;
-      const adaptResult = await callGeminiDirect(apiKey, adaptPrompt, WUXIA_STRICT_SYS_PROMPT, "gemini-4-hydrogen");
+      const adaptResult = await callGeminiDirect(apiKey, adaptPrompt, WUXIA_STRICT_SYS_PROMPT, "gemini-4-hydrogen", (msg) => {
+        const statusEl = document.getElementById('log-step2-status');
+        if (statusEl) statusEl.innerHTML = msg;
+      });
       const adaptData = parseJsonSafely(adaptResult.text);
       const s2Sec = ((Date.now() - activeStep2StartMs) / 1000).toFixed(1);
       activeStep2StartMs = null;
@@ -1632,7 +1657,10 @@ ${work.summary || ""}
     }
   ]
 }`;
-      const adaptResult = await callGeminiDirect(apiKey, adaptPrompt, WUXIA_STRICT_SYS_PROMPT, "gemini-4-hydrogen");
+      const adaptResult = await callGeminiDirect(apiKey, adaptPrompt, WUXIA_STRICT_SYS_PROMPT, "gemini-4-hydrogen", (msg) => {
+        const statusEl = document.getElementById('log-step2-status');
+        if (statusEl) statusEl.innerHTML = msg;
+      });
       let adaptData = null;
       let clean = adaptResult.text.trim();
       if (clean.includes("```json")) clean = clean.split("```json")[1].split("```")[0].trim();
