@@ -531,6 +531,26 @@
           </div>
         </div>
 
+        <!-- 2단계 실패 시 발굴 작품 보존 및 2단계 재시도 배너 -->
+        <div id="pending-retry-box" style="display: none; margin-top: 0.9rem; padding: 0.9rem 1rem; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+              <div style="font-size: 0.88rem; font-weight: 700; color: #92400e; margin-bottom: 0.25rem;">
+                💾 1/1.5단계 실존 검증 완료 작품 임시 보관 중 (새 발굴 없이 바로 2단계 재시도 가능)
+              </div>
+              <div id="pending-retry-info" style="font-size: 0.84rem; color: #78350f; line-height: 1.45;"></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <button id="btn-retry-stage2" class="btn btn-primary" onclick="retryPendingStage2()" style="padding: 0.55rem 0.95rem; font-size: 0.88rem; white-space: nowrap;">
+                🔄 2단계 치환만 다시 시도
+              </button>
+              <button id="btn-clear-pending" class="btn btn-secondary" onclick="clearPendingCandidate()" title="임시 보관 작품 비우기" style="padding: 0.55rem 0.75rem; font-size: 0.82rem; white-space: nowrap;">
+                ✕ 지우기
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div style="margin-top: 1rem; padding-top: 0.8rem; border-top: 1px dashed #cbd5e1; font-size: 0.85rem; color: #3b82f6; display: flex; align-items: center; gap: 0.5rem;">
           <span>⏰ <strong>클라우드 자동 스케줄 가동 중</strong>: 하루 6회 (새벽 12:50, 02:15, 04:30, 06:15, 낮 11:30, 오후 14:15) 클라우드가 스스로 1작품씩 발굴하여 <strong>[2. 전체 무협 아카이브]</strong>에 누적 보관합니다. (최대 120개 보관)</span>
         </div>
@@ -758,6 +778,7 @@
 
     loadArchiveFromFirebase();
     preloadGeminiApiKey();
+    loadPendingCandidate();
   });
 
   function signInWithGoogle() {
@@ -959,6 +980,15 @@
     return newKey;
   }
 
+  function formatGeminiErrorLabel(err) {
+    const msg = String(err?.message || '');
+    if (msg.includes('503') || msg.toLowerCase().includes('unavailable')) return '서버 혼잡(503)';
+    if (msg.includes('429')) return '할당량 제한(429)';
+    const codeMatch = msg.match(/\((\d{3})\)/);
+    if (codeMatch) return `HTTP ${codeMatch[1]}`;
+    return '일시 오류';
+  }
+
   // 브라우저 ➡️ 구글 API 직통 호출 (무협 치환: Hydrogen 우선 -> 503 시 1분 대기 후 1회 재시도 -> 실패/한도 시 3.8 Flash까지만 폴백)
   async function callGeminiDirect(apiKey, prompt, systemInstruction = null, primaryModel = "gemini-4-hydrogen", onStatus = null) {
     const modelsToTry = [primaryModel];
@@ -1029,7 +1059,7 @@
           lastErr = e;
           if (attempt < maxAttempts - 1) {
             if (isAdaptationModel) {
-              if (onStatus) onStatus(`${model} 일시 오류(${e.message.slice(0, 60)}) → 1분 대기 후 1회 재시도 중...`);
+              if (onStatus) onStatus(`${model} ${formatGeminiErrorLabel(e)} → 1분 대기 후 1회 재시도 중...`);
               await new Promise(r => setTimeout(r, 60000));
             } else {
               await new Promise(r => setTimeout(r, 3000));
@@ -1136,6 +1166,271 @@
     }
   }
 
+  const PENDING_WORK_STORAGE_KEY = 'story_hunter_pending_work';
+  let pendingCandidate = null;
+
+  function escapeHtmlText(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderPendingCandidateBox() {
+    const box = document.getElementById('pending-retry-box');
+    const infoEl = document.getElementById('pending-retry-info');
+    const retryBtn = document.getElementById('btn-retry-stage2');
+    if (!box || !infoEl || !retryBtn) return;
+
+    if (!pendingCandidate || !pendingCandidate.work || !pendingCandidate.canonicalTitle) {
+      box.style.display = 'none';
+      return;
+    }
+
+    box.style.display = 'block';
+    const { work, canonicalTitle, creator } = pendingCandidate;
+    const metaParts = [work.media, work.year].filter(Boolean).join(', ');
+    const metaLabel = metaParts ? ` (${escapeHtmlText(metaParts)})` : '';
+    const creatorLabel = creator ? ` · 원작: ${escapeHtmlText(creator)}` : '';
+    infoEl.innerHTML = `<strong>${escapeHtmlText(canonicalTitle)}</strong>${metaLabel}${creatorLabel} — 1/1.5단계 검증 결과가 보존되어 있습니다.`;
+
+    if (!retryBtn.disabled) {
+      const shortTitle = canonicalTitle.length > 24 ? canonicalTitle.slice(0, 24) + '…' : canonicalTitle;
+      retryBtn.innerHTML = `🔄 방금 발굴한 &ldquo;${escapeHtmlText(shortTitle)}&rdquo;으로 2단계 치환만 다시 시도`;
+    }
+  }
+
+  function savePendingCandidate(candidate) {
+    pendingCandidate = candidate;
+    try {
+      localStorage.setItem(PENDING_WORK_STORAGE_KEY, JSON.stringify(candidate));
+    } catch (e) {
+      console.warn('임시 발굴작 저장 실패:', e);
+    }
+    renderPendingCandidateBox();
+  }
+
+  function clearPendingCandidate() {
+    pendingCandidate = null;
+    try {
+      localStorage.removeItem(PENDING_WORK_STORAGE_KEY);
+    } catch (e) {}
+    renderPendingCandidateBox();
+  }
+
+  function loadPendingCandidate() {
+    try {
+      const raw = localStorage.getItem(PENDING_WORK_STORAGE_KEY);
+      if (!raw) {
+        renderPendingCandidateBox();
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.work && parsed.verifData && parsed.canonicalTitle) {
+        pendingCandidate = parsed;
+      } else {
+        localStorage.removeItem(PENDING_WORK_STORAGE_KEY);
+      }
+    } catch (e) {
+      pendingCandidate = null;
+    }
+    renderPendingCandidateBox();
+  }
+
+  function setPipelineButtonsDisabled(disabled) {
+    const discoverBtn = document.getElementById('btn-discover-single');
+    const retryBtn = document.getElementById('btn-retry-stage2');
+    const clearBtn = document.getElementById('btn-clear-pending');
+    if (discoverBtn) discoverBtn.disabled = disabled;
+    if (retryBtn) retryBtn.disabled = disabled;
+    if (clearBtn) clearBtn.disabled = disabled;
+  }
+
+  async function executeStage2Adaptation(candidate, { apiKey, startTimeMs, totalTimerEl, onStep2Start, onStep2End }) {
+    const { work, canonicalTitle, creator, refSourcesStr } = candidate;
+    const step2StartMs = Date.now();
+    if (onStep2Start) onStep2Start(step2StartMs);
+
+    appendDiscoverLog(
+      `log-step2`,
+      `<span>⏳</span><div><strong>[2단계 심층 분석 & 무협 치환]</strong> <span id="log-step2-status"><strong>Gemini 4 Hydrogen</strong> 실행 중...</span> (<span id="log-step2-timer" style="color:#1e3a8a;font-weight:700;">진행 중</span>)</div>`,
+      '#eff6ff'
+    );
+
+    const adaptPrompt = `
+당신은 전 세계의 서사 매체(영화, 드라마, 소설, 만화, 게임 등)를 정통무협(正統武俠) 웹소설로 재창조하는 최고의 스토리 디렉터입니다.
+
+작품 [${canonicalTitle}] (제작/원작자: ${creator}, 매체: ${work.media || ''}, 연도: ${work.year || ''})을 바탕으로,
+1) 원작의 핵심 사건/에피소드들을 생생한 서사형 스토리로 심층 분석하고,
+2) 각 에피소드를 [정통무협(正統武俠)] 장르로 완벽히 치환하십시오.
+
+[작품 출처 및 참고 문서 좌표]:
+${refSourcesStr || '- 위키피디아, TVTropes 및 관련 서사 데이터베이스'}
+
+[원작 기본 줄거리/설정 개요]:
+${work.summary || ""}
+
+[작성 및 치환 지침 - 절대 준수]:
+1. [실제 서사 종합]: 위 작품의 공식 줄거리, 위키, TV Tropes, 레딧 스레드, 대본, 팬포럼 등에 기록된 실제 사건 전개와 갈등을 종합 활용하십시오.
+2. [서사형 스토리텔링]: 에피소드를 항목별로 딱딱하게 파편화하지 말고, 발단부터 갈등 심화, 반전, 해결까지 한 편의 완성된 이야기처럼 자연스럽게 풀어낸 '스토리 요약본(2~4단락)'으로 작성하십시오. (Fact vs Inference 등 분석 꼬리표 금지)
+3. [에피소드 단위 독립 치환]: 전체 세계관이나 인물 명단을 통째로 바꾸지 말고, 오직 [각 사건/에피소드 단위]로 정통무협 치환 아이디어를 다각도에서 제시하십시오.
+4. [仙俠(선협) 절대 금지]: 도술, 선술, 영약 신선화, 강시, 환혼술, 기문진법 결계 등 선협 판타지는 100% 배제하고, 순수 정통무협(구파일방, 세가, 표국, 관부, 사파, 기경팔맥, 암기, 독공, 점혈, 협과 은원)의 문법만을 사용하십시오.
+
+반드시 아래 JSON 형식으로 반환하십시오:
+{
+  "work_title": "${canonicalTitle}",
+  "overall_premise": "작품 전체의 배경 및 핵심 전제 (2~3줄 요약)",
+  "episodes": [
+    {
+      "episode_title": "사건/에피소드 소제목",
+      "story_summary": "발단부터 갈등 심화, 반전, 결말까지 술술 읽히는 서사형 스토리 요약본 (2~4단락)",
+      "key_attraction": "이 에피소드의 핵심 재미/몰입/긴장감 포인트",
+      "wuxia_situation_concept": "무협으로 변환할 핵심 상황 컨셉 (1~2줄)",
+      "adaptation_ideas": [
+        {
+          "direction_name": "치환 방향 1 (예: 마교를 쫓는 정파 첩보전)",
+          "idea_description": "구체적이고 현실감 넘치는 정통무협 치환 아이디어 설명",
+          "novel_writing_hook": "웹소설에 실제 집필할 때 독자의 반응을 이끌어낼 핵심 사이다/클라이맥스 훅"
+        },
+        {
+          "direction_name": "치환 방향 2 (다른 각도 치환)",
+          "idea_description": "또 다른 각도에서의 정통무협 치환 아이디어 설명",
+          "novel_writing_hook": "웹소설 집필 시의 사이다/반전 포인트"
+        }
+      ],
+      "orthodox_martial_elements": "이 에피소드에 어울리는 정통무협 기믹 (기경팔맥, 점혈, 암기, 독, 표국, 관부 등)"
+    }
+  ]
+}`;
+    const adaptResult = await callGeminiDirect(apiKey, adaptPrompt, WUXIA_STRICT_SYS_PROMPT, "gemini-4-hydrogen", (msg) => {
+      const statusEl = document.getElementById('log-step2-status');
+      if (statusEl) statusEl.innerHTML = msg;
+    });
+    const adaptData = parseJsonSafely(adaptResult.text);
+    const s2Sec = ((Date.now() - step2StartMs) / 1000).toFixed(1);
+    if (onStep2End) onStep2End();
+
+    const totalSec = ((Date.now() - startTimeMs) / 1000).toFixed(1);
+    const epCount = (adaptData.episodes || []).length;
+    appendDiscoverLog(
+      `log-step2`,
+      `<span>✅</span><div><strong>[2단계 무협 치환 완료]</strong> <span style="color:#16a34a;font-weight:700;">(${s2Sec}초)</span> — 모델: ${adaptResult.usedModel} · ${epCount}개 에피소드 변환 & 클라우드 저장 완료!</div>`,
+      '#f0fdf4'
+    );
+    totalTimerEl.innerText = `총 ${totalSec}초 완료`;
+
+    // Markdown 리포트 조립
+    let md = `# [정통무협 에피소드 발굴 리포트] ${canonicalTitle}\n`;
+    md += `- **생성 일시**: ${formatAppDate()} (총 소요: ${totalSec}초)\n`;
+    md += `- **원작 정보**: ${canonicalTitle} (${work.year || ""}, ${work.country || ""}) | ${work.media || ""} (${work.genre || ""})\n`;
+    if (creator) md += `- **원작자/제작**: ${creator}\n`;
+    md += `- **적용 AI 모델**: ${adaptResult.usedModel}\n\n---\n\n`;
+    md += `## 1. 원작 및 추천 배경\n**전체 줄거리 요약**:\n${work.summary || ""}\n\n`;
+    md += `**추천 이유**:\n${work.recommendation_reason || ""}\n\n---\n\n`;
+    md += `## 2. 핵심 에피소드 분석 및 정통무협 치환 아이디어\n`;
+    md += `**작품 핵심 전제**: ${adaptData.overall_premise || ""}\n\n`;
+
+    (adaptData.episodes || []).forEach((ep, i) => {
+      md += `### ❖ [사건 ${i + 1}] ${ep.episode_title}\n`;
+      md += `**📖 원작 에피소드 스토리**:\n${ep.story_summary}\n\n`;
+      md += `**✨ 핵심 재미 포인트**: ${ep.key_attraction}\n\n`;
+      md += `#### ⚔️ 정통무협 치환 아이디어 (선협 배제)\n`;
+      md += `**상황 컨셉**: ${ep.wuxia_situation_concept || ""}\n\n`;
+      (ep.adaptation_ideas || []).forEach((idea, j) => {
+        md += `**[방향 ${j + 1}] ${idea.direction_name}**\n`;
+        md += `- **치환 아이디어**: ${idea.idea_description}\n`;
+        md += `- **사이다/클라이맥스 훅**: ${idea.novel_writing_hook}\n\n`;
+      });
+      if (ep.orthodox_martial_elements) {
+        md += `**💡 추천 무협 기믹/요소**: ${ep.orthodox_martial_elements}\n\n`;
+      }
+      md += `---\n\n`;
+    });
+
+    const report = {
+      id: 'rep_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      title: canonicalTitle,
+      date: formatAppDate(),
+      markdown: md,
+      isAdopted: false,
+      timestamp: Date.now()
+    };
+
+    archiveReports.unshift(report);
+    localStorage.setItem('wuxia_archive', JSON.stringify(archiveReports));
+    saveReportToFirebase(report);
+    updateTabBadges();
+
+    latestReport = report;
+    clearPendingCandidate();
+
+    // 최근 결과 카드 갱신
+    document.getElementById('latest-work-title').innerText = `${canonicalTitle} (${work.year || ''})`;
+    document.getElementById('latest-work-summary').innerText = work.summary || '';
+    document.getElementById('latest-work-model').innerText = `${adaptResult.usedModel} (${totalSec}초 심층생성)`;
+    document.getElementById('latest-result-container').style.display = 'block';
+
+    // 즉시 전체 리포트 팝업 모달 오픈
+    openModal(report.id, report.title, report.markdown);
+  }
+
+  async function retryPendingStage2() {
+    if (!pendingCandidate || !pendingCandidate.work || !pendingCandidate.verifData) {
+      alert('다시 시도할 발굴 작품이 없습니다.');
+      renderPendingCandidateBox();
+      return;
+    }
+
+    const retryBtn = document.getElementById('btn-retry-stage2');
+    const progressBox = document.getElementById('discover-progress-box');
+    const logList = document.getElementById('discover-log-list');
+    const totalTimerEl = document.getElementById('discover-total-timer');
+
+    setPipelineButtonsDisabled(true);
+    progressBox.style.display = 'block';
+    logList.innerHTML = '';
+
+    const startTimeMs = Date.now();
+    let step2StartMs = startTimeMs;
+    totalTimerEl.innerText = '진행 중';
+    retryBtn.innerHTML = `<span class="loading-spinner"></span> 2단계 치환 재시도 중 (진행 중)`;
+
+    const timerInterval = setInterval(() => {
+      const bucket = Math.floor((Date.now() - step2StartMs) / 10000) * 10;
+      const label = bucket > 0 ? `${bucket}초 경과` : '진행 중';
+      totalTimerEl.innerText = label;
+      const step2El = document.getElementById('log-step2-timer');
+      if (step2El) step2El.innerText = label;
+      retryBtn.innerHTML = `<span class="loading-spinner"></span> 2단계 치환 재시도 중 (${label})`;
+    }, 10000);
+
+    try {
+      const apiKey = await getGeminiApiKey();
+      const { work, canonicalTitle, creator } = pendingCandidate;
+      appendDiscoverLog(
+        `log-restored`,
+        `<span>💾</span><div><strong>[보존된 1/1.5단계 불러오기]</strong> — 대상: <strong>${escapeHtmlText(canonicalTitle)}</strong> (${escapeHtmlText(work.media || '')}, ${escapeHtmlText(work.year || '')}${creator ? ' · 원작: ' + escapeHtmlText(creator) : ''})</div>`,
+        '#f0fdf4'
+      );
+
+      await executeStage2Adaptation(pendingCandidate, {
+        apiKey,
+        startTimeMs,
+        totalTimerEl,
+        onStep2Start: (ms) => { step2StartMs = ms; }
+      });
+    } catch (err) {
+      appendDiscoverLog(`log-err`, `<span>❌</span><div style="color:#dc2626;"><strong>[오류 발생]</strong> ${escapeHtmlText(err.message)}</div>`, '#fef2f2');
+      alert(`2단계 치환 재시도 중 오류: ${err.message}\n발굴된 작품은 계속 보관되므로 잠시 후 다시 시도하실 수 있습니다.`);
+    } finally {
+      clearInterval(timerInterval);
+      setPipelineButtonsDisabled(false);
+      renderPendingCandidateBox();
+    }
+  }
+
   async function startAutoSingle() {
     const btn = document.getElementById('btn-discover-single');
     const theme = document.getElementById('discover-theme').value.trim();
@@ -1143,7 +1438,7 @@
     const logList = document.getElementById('discover-log-list');
     const totalTimerEl = document.getElementById('discover-total-timer');
 
-    btn.disabled = true;
+    setPipelineButtonsDisabled(true);
     progressBox.style.display = 'block';
     logList.innerHTML = '';
 
@@ -1296,136 +1591,30 @@
       const creator = verifData.creator_or_author || '';
       const refSourcesStr = (verifData.reference_sources || []).map(s => `- ${s}`).join('\n');
 
+      // 1/1.5단계 통과 작품 임시 보존 (2단계 오류 시 1단계 재발굴 없이 2단계만 재시도 가능)
+      const candidate = { work, verifData, canonicalTitle, creator, refSourcesStr, savedAt: Date.now() };
+      savePendingCandidate(candidate);
+
       // 2단계: 심층 서사 분석 및 정통무협 치환 (Gemini 4 Hydrogen 우선 -> 503 1분 대기 재시도 -> 3.8 Flash 폴백)
-      activeStep2StartMs = Date.now();
       btn.innerHTML = `<span class="loading-spinner"></span> 2단계 심층 치환 중 (진행 중)`;
-      appendDiscoverLog(
-        `log-step2`,
-        `<span>⏳</span><div><strong>[2단계 심층 분석 & 무협 치환]</strong> <span id="log-step2-status"><strong>Gemini 4 Hydrogen</strong> 실행 중...</span> (<span id="log-step2-timer" style="color:#1e3a8a;font-weight:700;">진행 중</span>)</div>`,
-        '#eff6ff'
-      );
-
-      const adaptPrompt = `
-당신은 전 세계의 서사 매체(영화, 드라마, 소설, 만화, 게임 등)를 정통무협(正統武俠) 웹소설로 재창조하는 최고의 스토리 디렉터입니다.
-
-작품 [${canonicalTitle}] (제작/원작자: ${creator}, 매체: ${work.media || ''}, 연도: ${work.year || ''})을 바탕으로,
-1) 원작의 핵심 사건/에피소드들을 생생한 서사형 스토리로 심층 분석하고,
-2) 각 에피소드를 [정통무협(正統武俠)] 장르로 완벽히 치환하십시오.
-
-[작품 출처 및 참고 문서 좌표]:
-${refSourcesStr || '- 위키피디아, TVTropes 및 관련 서사 데이터베이스'}
-
-[원작 기본 줄거리/설정 개요]:
-${work.summary || ""}
-
-[작성 및 치환 지침 - 절대 준수]:
-1. [실제 서사 종합]: 위 작품의 공식 줄거리, 위키, TV Tropes, 레딧 스레드, 대본, 팬포럼 등에 기록된 실제 사건 전개와 갈등을 종합 활용하십시오.
-2. [서사형 스토리텔링]: 에피소드를 항목별로 딱딱하게 파편화하지 말고, 발단부터 갈등 심화, 반전, 해결까지 한 편의 완성된 이야기처럼 자연스럽게 풀어낸 '스토리 요약본(2~4단락)'으로 작성하십시오. (Fact vs Inference 등 분석 꼬리표 금지)
-3. [에피소드 단위 독립 치환]: 전체 세계관이나 인물 명단을 통째로 바꾸지 말고, 오직 [각 사건/에피소드 단위]로 정통무협 치환 아이디어를 다각도에서 제시하십시오.
-4. [仙俠(선협) 절대 금지]: 도술, 선술, 영약 신선화, 강시, 환혼술, 기문진법 결계 등 선협 판타지는 100% 배제하고, 순수 정통무협(구파일방, 세가, 표국, 관부, 사파, 기경팔맥, 암기, 독공, 점혈, 협과 은원)의 문법만을 사용하십시오.
-
-반드시 아래 JSON 형식으로 반환하십시오:
-{
-  "work_title": "${canonicalTitle}",
-  "overall_premise": "작품 전체의 배경 및 핵심 전제 (2~3줄 요약)",
-  "episodes": [
-    {
-      "episode_title": "사건/에피소드 소제목",
-      "story_summary": "발단부터 갈등 심화, 반전, 결말까지 술술 읽히는 서사형 스토리 요약본 (2~4단락)",
-      "key_attraction": "이 에피소드의 핵심 재미/몰입/긴장감 포인트",
-      "wuxia_situation_concept": "무협으로 변환할 핵심 상황 컨셉 (1~2줄)",
-      "adaptation_ideas": [
-        {
-          "direction_name": "치환 방향 1 (예: 마교를 쫓는 정파 첩보전)",
-          "idea_description": "구체적이고 현실감 넘치는 정통무협 치환 아이디어 설명",
-          "novel_writing_hook": "웹소설에 실제 집필할 때 독자의 반응을 이끌어낼 핵심 사이다/클라이맥스 훅"
-        },
-        {
-          "direction_name": "치환 방향 2 (다른 각도 치환)",
-          "idea_description": "또 다른 각도에서의 정통무협 치환 아이디어 설명",
-          "novel_writing_hook": "웹소설 집필 시의 사이다/반전 포인트"
-        }
-      ],
-      "orthodox_martial_elements": "이 에피소드에 어울리는 정통무협 기믹 (기경팔맥, 점혈, 암기, 독, 표국, 관부 등)"
-    }
-  ]
-}`;
-      const adaptResult = await callGeminiDirect(apiKey, adaptPrompt, WUXIA_STRICT_SYS_PROMPT, "gemini-4-hydrogen", (msg) => {
-        const statusEl = document.getElementById('log-step2-status');
-        if (statusEl) statusEl.innerHTML = msg;
+      await executeStage2Adaptation(candidate, {
+        apiKey,
+        startTimeMs,
+        totalTimerEl,
+        onStep2Start: (ms) => { activeStep2StartMs = ms; },
+        onStep2End: () => { activeStep2StartMs = null; }
       });
-      const adaptData = parseJsonSafely(adaptResult.text);
-      const s2Sec = ((Date.now() - activeStep2StartMs) / 1000).toFixed(1);
-      activeStep2StartMs = null;
-
-      const totalSec = ((Date.now() - startTimeMs) / 1000).toFixed(1);
-      const epCount = (adaptData.episodes || []).length;
-      appendDiscoverLog(
-        `log-step2`,
-        `<span>✅</span><div><strong>[2단계 무협 치환 완료]</strong> <span style="color:#16a34a;font-weight:700;">(${s2Sec}초)</span> — 모델: ${adaptResult.usedModel} · ${epCount}개 에피소드 변환 & 클라우드 저장 완료!</div>`,
-        '#f0fdf4'
-      );
-      totalTimerEl.innerText = `총 ${totalSec}초 완료`;
-
-      // Markdown 리포트 조립
-      let md = `# [정통무협 에피소드 발굴 리포트] ${canonicalTitle}\n`;
-      md += `- **생성 일시**: ${formatAppDate()} (총 소요: ${totalSec}초)\n`;
-      md += `- **원작 정보**: ${canonicalTitle} (${work.year || ""}, ${work.country || ""}) | ${work.media || ""} (${work.genre || ""})\n`;
-      if (creator) md += `- **원작자/제작**: ${creator}\n`;
-      md += `- **적용 AI 모델**: ${adaptResult.usedModel}\n\n---\n\n`;
-      md += `## 1. 원작 및 추천 배경\n**전체 줄거리 요약**:\n${work.summary || ""}\n\n`;
-      md += `**추천 이유**:\n${work.recommendation_reason || ""}\n\n---\n\n`;
-      md += `## 2. 핵심 에피소드 분석 및 정통무협 치환 아이디어\n`;
-      md += `**작품 핵심 전제**: ${adaptData.overall_premise || ""}\n\n`;
-
-      (adaptData.episodes || []).forEach((ep, i) => {
-        md += `### ❖ [사건 ${i + 1}] ${ep.episode_title}\n`;
-        md += `**📖 원작 에피소드 스토리**:\n${ep.story_summary}\n\n`;
-        md += `**✨ 핵심 재미 포인트**: ${ep.key_attraction}\n\n`;
-        md += `#### ⚔️ 정통무협 치환 아이디어 (선협 배제)\n`;
-        md += `**상황 컨셉**: ${ep.wuxia_situation_concept || ""}\n\n`;
-        (ep.adaptation_ideas || []).forEach((idea, j) => {
-          md += `**[방향 ${j + 1}] ${idea.direction_name}**\n`;
-          md += `- **치환 아이디어**: ${idea.idea_description}\n`;
-          md += `- **사이다/클라이맥스 훅**: ${idea.novel_writing_hook}\n\n`;
-        });
-        if (ep.orthodox_martial_elements) {
-          md += `**💡 추천 무협 기믹/요소**: ${ep.orthodox_martial_elements}\n\n`;
-        }
-        md += `---\n\n`;
-      });
-
-      const report = {
-        id: 'rep_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-        title: canonicalTitle,
-        date: formatAppDate(),
-        markdown: md,
-        isAdopted: false,
-        timestamp: Date.now()
-      };
-
-      archiveReports.unshift(report);
-      localStorage.setItem('wuxia_archive', JSON.stringify(archiveReports));
-      saveReportToFirebase(report);
-      updateTabBadges();
-
-      latestReport = report;
-
-      // 최근 결과 카드 갱신
-      document.getElementById('latest-work-title').innerText = `${canonicalTitle} (${work.year || ''})`;
-      document.getElementById('latest-work-summary').innerText = work.summary || '';
-      document.getElementById('latest-work-model').innerText = `${adaptResult.usedModel} (${totalSec}초 심층생성)`;
-      document.getElementById('latest-result-container').style.display = 'block';
-
-      // 즉시 전체 리포트 팝업 모달 오픈
-      openModal(report.id, report.title, report.markdown);
     } catch (err) {
-      appendDiscoverLog(`log-err`, `<span>❌</span><div style="color:#dc2626;"><strong>[오류 발생]</strong> ${err.message}</div>`, '#fef2f2');
-      alert(`발굴/변환 중 오류: ${err.message}\n잠시 후 다시 시도해 주세요.`);
+      appendDiscoverLog(`log-err`, `<span>❌</span><div style="color:#dc2626;"><strong>[오류 발생]</strong> ${escapeHtmlText(err.message)}</div>`, '#fef2f2');
+      const preservedMsg = (pendingCandidate && pendingCandidate.canonicalTitle)
+        ? `\n\n💾 발굴된 작품("${pendingCandidate.canonicalTitle}")은 임시 보관되었습니다. 잠시 후 아래 [2단계 치환만 다시 시도] 버튼으로 이어서 실행할 수 있습니다.`
+        : '\n잠시 후 다시 시도해 주세요.';
+      alert(`발굴/변환 중 오류: ${err.message}${preservedMsg}`);
     } finally {
       clearInterval(timerInterval);
-      btn.disabled = false;
+      setPipelineButtonsDisabled(false);
       btn.innerHTML = `<span>🚀 1작품 발굴 및 무협 변환 시작</span>`;
+      renderPendingCandidateBox();
     }
   }
 
