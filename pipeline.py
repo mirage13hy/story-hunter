@@ -140,7 +140,8 @@ class StoryHunterPipeline:
         last_error = None
         for current_model in models_to_try:
             print(f">> [호출 시도] 모델: {current_model}")
-            max_attempts = 4
+            # Gemini 4 Hydrogen(20회/일)은 503 등의 오류도 RPD 차감 가능성이 있으므로 자동 재시도 금지(최대 1회만 호출)
+            max_attempts = 1 if current_model == ADAPTATION_MODEL else 3
             for attempt in range(max_attempts):
                 try:
                     config_args = {"temperature": temperature}
@@ -167,19 +168,24 @@ class StoryHunterPipeline:
                                 )
                             print(">> 경량 모델 일일 한도(RPD) 소진 감지 → 다음 경량 모델로 전환합니다.")
                             break
+                        if current_model == ADAPTATION_MODEL:
+                            raise RuntimeError(f"Gemini 4 Hydrogen 호출 제한({e}) — 할당량 보호를 위해 자동 재시도 없이 중단합니다.")
                         wait_sec = _retry_delay_seconds(err_msg, default=60)
                         print(f">> 분당 한도(RPM/TPM) 초과 → {wait_sec}초 기다린 뒤 같은 모델로 재시도합니다...")
                         time.sleep(wait_sec)
                         continue
 
-                    # 2. 503 서버 혼잡, 504 타임아웃, 502/500 일시적 장애
+                    # 2. 503 서버 혼잡, 504 타임아웃, 502/500 일시적 장애 (Hydrogen은 재시도 없이 즉시 중단)
+                    if current_model == ADAPTATION_MODEL:
+                        raise RuntimeError(f"Gemini 4 Hydrogen 서버 오류({e}) — 503 등 실패 시도 할당량 연쇄 차감 방지를 위해 자동 재시도 없이 즉시 중단합니다.")
+
                     if any(code in err_msg for code in ["503", "504", "502", "500", "overloaded", "unavailable", "timeout", "busy"]):
                         wait_sec = (attempt + 1) * 15
                         print(f">> 구글 API 서버 혼잡/타임아웃: {wait_sec}초 대기 후 재시도합니다...")
                         time.sleep(wait_sec)
                         continue
 
-                    # 그 외 일반 에러도 잠시 대기 후 재시도
+                    # 그 외 일반 에러도 경량 모델만 잠시 대기 후 재시도
                     if attempt < max_attempts - 1:
                         time.sleep(5 * (attempt + 1))
 
